@@ -1,0 +1,30 @@
+# Node
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Rust / Tauri
+target/
+src-tauri/target/
+
+# Env & secrets
+.env
+.env.*
+*.pem
+*.key
+
+# Database
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Local tooling state
+.claude/
