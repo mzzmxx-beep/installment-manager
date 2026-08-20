@@ -13,8 +13,6 @@ export interface Customer {
   created_at: string;
 }
 
-export type Guarantor = Customer;
-
 export interface Product {
   id: number;
   name: string;
@@ -87,19 +85,6 @@ export function createCustomer(payload: {
   address: string | null;
 }): Promise<Customer> {
   return invoke("create_customer", { payload });
-}
-
-export function getGuarantors(searchTerm: string | null = null): Promise<Guarantor[]> {
-  return invoke("get_guarantors", { searchTerm });
-}
-
-export function createGuarantor(payload: {
-  name: string;
-  phone: string | null;
-  national_id: string;
-  address: string | null;
-}): Promise<Guarantor> {
-  return invoke("create_guarantor", { payload });
 }
 
 export function getActiveProducts(): Promise<Product[]> {

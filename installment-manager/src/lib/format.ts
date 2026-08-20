@@ -18,3 +18,20 @@ export function toStorageAmount(value: string, currency: CurrencyCode): number {
 export function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
+
+/**
+ * Mirrors the backend's `engine::convert_currency` for live previews only —
+ * the authoritative amount is always recomputed server-side on save.
+ * `rateMicros` is IQD per 1 USD, scaled by 1,000,000.
+ */
+export function convertCurrency(
+  amount: number,
+  from: CurrencyCode,
+  to: CurrencyCode,
+  rateMicros: number,
+): number {
+  if (from === to) return amount;
+  if (from === "USD" && to === "IQD") return Math.round((amount * rateMicros) / 100_000_000);
+  if (from === "IQD" && to === "USD") return Math.round((amount * 100_000_000) / rateMicros);
+  return amount;
+}

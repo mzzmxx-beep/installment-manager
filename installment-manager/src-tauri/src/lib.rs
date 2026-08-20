@@ -21,8 +21,6 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::customer::create_customer,
             commands::customer::get_customers,
-            commands::guarantor::create_guarantor,
-            commands::guarantor::get_guarantors,
             commands::product::create_product,
             commands::product::get_active_products,
             commands::sale::create_credit_sale,

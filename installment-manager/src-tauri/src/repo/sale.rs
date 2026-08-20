@@ -15,6 +15,12 @@ pub fn create_credit_sale(
     if payload.items.is_empty() {
         return Err("a sale must have at least one item".into());
     }
+    if payload.manual_exchange_rate_micros <= 0 {
+        return Err("manual_exchange_rate_micros must be positive".into());
+    }
+    if payload.guarantor_id == Some(payload.customer_id) {
+        return Err("a customer cannot guarantee their own sale".into());
+    }
 
     let sale_date = NaiveDate::parse_from_str(&payload.sale_date, "%Y-%m-%d")
         .map_err(|e| format!("invalid sale_date: {e}"))?;
@@ -22,23 +28,35 @@ pub fn create_credit_sale(
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
     let mut cash_total: i64 = 0;
-    let mut item_rows: Vec<(i64, String, i64, i64)> = Vec::new(); // product_id, name, snapshot_cash_price, quantity
+    // product_id, name, snapshot_cash_price (converted into the sale's own
+    // currency), quantity
+    let mut item_rows: Vec<(i64, String, i64, i64)> = Vec::new();
     for item in &payload.items {
         if item.quantity <= 0 {
             return Err("item quantity must be positive".into());
         }
-        let (name, cash_price, is_active): (String, i64, i64) = tx
+        let (name, cash_price, product_currency, is_active): (String, i64, String, i64) = tx
             .query_row(
-                "SELECT name, reference_cash_price, is_active FROM product WHERE id = ?1",
+                "SELECT name, reference_cash_price, currency_code, is_active FROM product WHERE id = ?1",
                 params![item.product_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
             .map_err(|e| format!("product {} not found: {e}", item.product_id))?;
         if is_active == 0 {
             return Err(format!("product {} is not active", item.product_id));
         }
-        cash_total += cash_price * item.quantity;
-        item_rows.push((item.product_id, name, cash_price, item.quantity));
+        // Products may be priced in either currency; snapshot the unit
+        // price converted into the sale's own currency (via this sale's
+        // manual rate) so every item on a sale is directly summable —
+        // credit_sale_item has no currency column of its own.
+        let unit_price = engine::convert_currency(
+            cash_price,
+            &product_currency,
+            &payload.currency_code,
+            payload.manual_exchange_rate_micros,
+        );
+        cash_total += unit_price * item.quantity;
+        item_rows.push((item.product_id, name, unit_price, item.quantity));
     }
 
     let applied_markup_value = engine::resolve_markup(cash_total, payload.markup_type, payload.markup_input);
@@ -298,5 +316,106 @@ mod tests {
             },
         );
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn rejects_customer_as_their_own_guarantor() {
+        let mut conn = init_test_db();
+        let (customer_id, product_id) = setup_customer_and_product(&conn);
+
+        let result = create_credit_sale(
+            &mut conn,
+            CreateCreditSalePayload {
+                customer_id,
+                guarantor_id: Some(customer_id),
+                sale_date: "2026-01-15".into(),
+                items: vec![CreditSaleItemInput { product_id, quantity: 1 }],
+                markup_type: MarkupType::Flat,
+                markup_input: 0,
+                agreed_months: 3,
+                currency_code: "IQD".into(),
+                manual_exchange_rate_micros: 1_000_000,
+            },
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn guarantor_id_references_another_customer() {
+        let mut conn = init_test_db();
+        let (customer_id, product_id) = setup_customer_and_product(&conn);
+        let guarantor = repo::customer::create_customer(
+            &conn,
+            CreateCustomerPayload {
+                name: "Guarantor Customer".into(),
+                phone: None,
+                national_id: "NID-S002".into(),
+                address: None,
+            },
+        )
+        .unwrap();
+
+        let sale = create_credit_sale(
+            &mut conn,
+            CreateCreditSalePayload {
+                customer_id,
+                guarantor_id: Some(guarantor.id),
+                sale_date: "2026-01-15".into(),
+                items: vec![CreditSaleItemInput { product_id, quantity: 1 }],
+                markup_type: MarkupType::Flat,
+                markup_input: 0,
+                agreed_months: 1,
+                currency_code: "IQD".into(),
+                manual_exchange_rate_micros: 1_000_000,
+            },
+        )
+        .expect("create_credit_sale with a guarantor should succeed");
+
+        assert_eq!(sale.guarantor_id, Some(guarantor.id));
+    }
+
+    #[test]
+    fn item_prices_are_converted_into_the_sale_currency() {
+        let mut conn = init_test_db();
+        let customer = repo::customer::create_customer(
+            &conn,
+            CreateCustomerPayload {
+                name: "Cross Currency Buyer".into(),
+                phone: None,
+                national_id: "NID-S003".into(),
+                address: None,
+            },
+        )
+        .unwrap();
+        // Priced in USD, but the sale itself will be in IQD.
+        let usd_product = repo::product::create_product(
+            &conn,
+            CreateProductPayload {
+                name: "Phone".into(),
+                reference_cash_price: 100, // $1.00
+                currency_code: "USD".into(),
+            },
+        )
+        .unwrap();
+
+        let sale = create_credit_sale(
+            &mut conn,
+            CreateCreditSalePayload {
+                customer_id: customer.id,
+                guarantor_id: None,
+                sale_date: "2026-01-15".into(),
+                items: vec![CreditSaleItemInput { product_id: usd_product.id, quantity: 2 }],
+                markup_type: MarkupType::Flat,
+                markup_input: 0,
+                agreed_months: 1,
+                currency_code: "IQD".into(),
+                manual_exchange_rate_micros: 1_500_000_000, // 1,500 IQD / USD
+            },
+        )
+        .expect("create_credit_sale across currencies should succeed");
+
+        // $1.00 -> 1,500 IQD per unit, times 2 units = 3,000 IQD.
+        assert_eq!(sale.items[0].snapshot_cash_price, 1_500);
+        assert_eq!(sale.total_installment_price, 3_000);
     }
 }

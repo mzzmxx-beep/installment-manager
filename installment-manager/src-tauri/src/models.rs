@@ -22,26 +22,6 @@ pub struct CreateCustomerPayload {
     pub address: Option<String>,
 }
 
-/// Typed response DTO for a Guarantor row (mirrors Customer, ARCHITECTURE.md §8).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GuarantorDto {
-    pub id: i64,
-    pub name: String,
-    pub phone: Option<String>,
-    pub national_id: String,
-    pub address: Option<String>,
-    pub created_at: String,
-}
-
-/// Request DTO for creating a new Guarantor.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CreateGuarantorPayload {
-    pub name: String,
-    pub phone: Option<String>,
-    pub national_id: String,
-    pub address: Option<String>,
-}
-
 /// Typed response DTO for a Product row. `reference_cash_price` is a
 /// template only (ARCHITECTURE.md §8) — never used to redisplay a
 /// historical sale's price.
@@ -113,6 +93,9 @@ pub struct InstallmentDto {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateCreditSalePayload {
     pub customer_id: i64,
+    /// An existing customer vouching for this sale, if any — a guarantor is
+    /// not a separate entity, just another `Customer` row (must differ from
+    /// `customer_id`).
     pub guarantor_id: Option<i64>,
     pub sale_date: String,
     pub items: Vec<CreditSaleItemInput>,

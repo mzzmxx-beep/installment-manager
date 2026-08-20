@@ -3,14 +3,12 @@ import {
   createCreditSale,
   getActiveProducts,
   getCustomers,
-  getGuarantors,
   type CurrencyCode,
   type Customer,
-  type Guarantor,
   type MarkupType,
   type Product,
 } from "@/lib/api";
-import { formatMoney, todayIso, toStorageAmount } from "@/lib/format";
+import { convertCurrency, formatMoney, todayIso, toStorageAmount } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -24,7 +22,6 @@ interface ItemRow {
 
 export function NewSalePage({ onCreated }: { onCreated: (customerId: number) => void }) {
   const [customers, setCustomers] = useState<Customer[]>([]);
-  const [guarantors, setGuarantors] = useState<Guarantor[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -41,23 +38,29 @@ export function NewSalePage({ onCreated }: { onCreated: (customerId: number) => 
 
   useEffect(() => {
     getCustomers().then(setCustomers).catch((e) => setError(String(e)));
-    getGuarantors().then(setGuarantors).catch((e) => setError(String(e)));
     getActiveProducts().then(setProducts).catch((e) => setError(String(e)));
   }, []);
 
-  const availableProducts = useMemo(
-    () => products.filter((p) => p.currency_code === currency),
-    [products, currency],
-  );
+  // A customer can't guarantee their own sale — drop a stale selection if
+  // the buyer changes to match it.
+  useEffect(() => {
+    if (guarantorId && guarantorId === customerId) {
+      setGuarantorId("");
+    }
+  }, [customerId, guarantorId]);
+
+  const rateMicros = Math.round((Number(exchangeRate) || 0) * 1_000_000);
 
   const cashTotal = useMemo(
     () =>
       items.reduce((sum, item) => {
-        const product = availableProducts.find((p) => String(p.id) === item.productId);
+        const product = products.find((p) => String(p.id) === item.productId);
         const qty = Number(item.quantity) || 0;
-        return sum + (product ? product.reference_cash_price * qty : 0);
+        if (!product) return sum;
+        const unitPrice = convertCurrency(product.reference_cash_price, product.currency_code, currency, rateMicros);
+        return sum + unitPrice * qty;
       }, 0),
-    [items, availableProducts],
+    [items, products, currency, rateMicros],
   );
 
   const markupValue = useMemo(() => {
@@ -114,7 +117,7 @@ export function NewSalePage({ onCreated }: { onCreated: (customerId: number) => 
         markup_input: markupType === "flat" ? toStorageAmount(markupInput, currency) : Math.round((Number(markupInput) || 0) * 100),
         agreed_months: months,
         currency_code: currency,
-        manual_exchange_rate_micros: Math.round((Number(exchangeRate) || 0) * 1_000_000),
+        manual_exchange_rate_micros: rateMicros,
       });
       onCreated(Number(customerId));
     } catch (e) {
@@ -148,11 +151,13 @@ export function NewSalePage({ onCreated }: { onCreated: (customerId: number) => 
                 <Label htmlFor="s-guarantor">الكفيل (اختياري)</Label>
                 <Select id="s-guarantor" value={guarantorId} onChange={(e) => setGuarantorId(e.target.value)}>
                   <option value="">بدون كفيل</option>
-                  {guarantors.map((g) => (
-                    <option key={g.id} value={g.id}>
-                      {g.name}
-                    </option>
-                  ))}
+                  {customers
+                    .filter((c) => String(c.id) !== customerId)
+                    .map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
                 </Select>
               </div>
               <div className="flex flex-col gap-1.5">
@@ -178,7 +183,7 @@ export function NewSalePage({ onCreated }: { onCreated: (customerId: number) => 
                     onChange={(e) => updateItem(index, { productId: e.target.value })}
                   >
                     <option value="">اختر منتجاً</option>
-                    {availableProducts.map((p) => (
+                    {products.map((p) => (
                       <option key={p.id} value={p.id}>
                         {p.name} — {formatMoney(p.reference_cash_price, p.currency_code)}
                       </option>
@@ -205,9 +210,10 @@ export function NewSalePage({ onCreated }: { onCreated: (customerId: number) => 
               <Button type="button" variant="outline" size="sm" onClick={addItemRow} className="self-start">
                 + إضافة منتج
               </Button>
-              {availableProducts.length === 0 && (
-                <p className="text-sm text-muted-foreground">لا يوجد منتجات بعملة {currency}.</p>
-              )}
+              {products.length === 0 && <p className="text-sm text-muted-foreground">لا يوجد منتجات بعد.</p>}
+              <p className="text-xs text-muted-foreground">
+                منتجات بعملة مختلفة عن عملة البيع تُحوَّل تلقائياً حسب سعر الصرف أدناه.
+              </p>
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2">
@@ -243,7 +249,7 @@ export function NewSalePage({ onCreated }: { onCreated: (customerId: number) => 
                 />
               </div>
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="s-rate">سعر الصرف اليدوي</Label>
+                <Label htmlFor="s-rate">سعر الصرف اليدوي (دينار مقابل دولار واحد)</Label>
                 <Input
                   id="s-rate"
                   type="number"
