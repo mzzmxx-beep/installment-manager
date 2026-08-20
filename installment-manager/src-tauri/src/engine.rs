@@ -70,9 +70,27 @@ fn days_in_month(year: i32, month: u32) -> u32 {
         .day()
 }
 
+/// Converts `amount` from `from_currency` into `to_currency` using
+/// `rate_micros` — IQD per 1 USD, scaled by 1,000,000 (ARCHITECTURE.md §5,
+/// same convention as `credit_sale`/`payment.manual_exchange_rate_micros`).
+/// Same-currency conversions are a no-op (avoids introducing rounding noise
+/// on the common case). Panics if `rate_micros <= 0` for a cross-currency
+/// conversion — callers must validate the rate before reaching this point.
+pub fn convert_currency(amount: i64, from_currency: &str, to_currency: &str, rate_micros: i64) -> i64 {
+    if from_currency == to_currency {
+        return amount;
+    }
+    match (from_currency, to_currency) {
+        ("USD", "IQD") => round_half_up(amount as i128 * rate_micros as i128, 100_000_000),
+        ("IQD", "USD") => round_half_up(amount as i128 * 100_000_000, rate_micros as i128),
+        _ => amount,
+    }
+}
+
 pub struct OutstandingInstallment {
     pub id: i64,
     pub remaining: i64,
+    pub currency: String,
 }
 
 pub struct Allocation {
@@ -80,12 +98,21 @@ pub struct Allocation {
     pub amount: i64,
 }
 
-/// Greedily allocates `payment_amount` across `outstanding` installments,
-/// which must already be sorted oldest-due-date-first. Returns the
-/// allocations plus any amount left over (payment exceeded total
-/// outstanding) instead of silently dropping it.
+/// Greedily allocates a payment of `payment_amount` (in `payment_currency`)
+/// across `outstanding` installments, which must already be sorted
+/// oldest-due-date-first, regardless of each installment's own currency
+/// (ARCHITECTURE.md §4 generalized across currencies). Installments in a
+/// different currency than the payment are converted via `rate_micros`, the
+/// single rate entered for this payment. Each `Allocation.amount` is always
+/// denominated in that installment's own currency — never the payment's —
+/// since it is later summed directly against `scheduled_amount` (ARCHITECTURE.md
+/// §8: installment balances are derived, never stored). Returns the
+/// allocations plus any payment amount left over (payment exceeded total
+/// outstanding, or nothing was outstanding) instead of silently dropping it.
 pub fn allocate_payment(
     payment_amount: i64,
+    payment_currency: &str,
+    rate_micros: i64,
     outstanding: &[OutstandingInstallment],
 ) -> (Vec<Allocation>, i64) {
     let mut remaining_payment = payment_amount;
@@ -95,17 +122,25 @@ pub fn allocate_payment(
         if remaining_payment <= 0 {
             break;
         }
-        let take = remaining_payment.min(installment.remaining);
-        if take > 0 {
-            allocations.push(Allocation {
-                installment_id: installment.id,
-                amount: take,
-            });
-            remaining_payment -= take;
+        let available = convert_currency(remaining_payment, payment_currency, &installment.currency, rate_micros);
+        let take = available.min(installment.remaining);
+        if take <= 0 {
+            continue;
         }
+        allocations.push(Allocation {
+            installment_id: installment.id,
+            amount: take,
+        });
+        // Re-derive the payment-currency remainder from what's actually left
+        // in the installment's currency, rather than converting `take` back
+        // directly — when this installment absorbs the payment in full,
+        // `available - take` is exactly 0 and skips a redundant round-trip
+        // rounding step.
+        let leftover_in_installment_currency = available - take;
+        remaining_payment = convert_currency(leftover_in_installment_currency, &installment.currency, payment_currency, rate_micros);
     }
 
-    (allocations, remaining_payment)
+    (allocations, remaining_payment.max(0))
 }
 
 #[cfg(test)]
@@ -143,11 +178,11 @@ mod tests {
     #[test]
     fn allocation_walks_oldest_first_and_reports_leftover() {
         let outstanding = vec![
-            OutstandingInstallment { id: 1, remaining: 100 },
-            OutstandingInstallment { id: 2, remaining: 200 },
+            OutstandingInstallment { id: 1, remaining: 100, currency: "IQD".into() },
+            OutstandingInstallment { id: 2, remaining: 200, currency: "IQD".into() },
         ];
 
-        let (allocations, leftover) = allocate_payment(250, &outstanding);
+        let (allocations, leftover) = allocate_payment(250, "IQD", 1_000_000, &outstanding);
         assert_eq!(allocations.len(), 2);
         assert_eq!(allocations[0].installment_id, 1);
         assert_eq!(allocations[0].amount, 100);
@@ -155,13 +190,66 @@ mod tests {
         assert_eq!(allocations[1].amount, 150);
         assert_eq!(leftover, 0);
 
-        let (allocations, leftover) = allocate_payment(50, &outstanding);
+        let (allocations, leftover) = allocate_payment(50, "IQD", 1_000_000, &outstanding);
         assert_eq!(allocations.len(), 1);
         assert_eq!(allocations[0].amount, 50);
         assert_eq!(leftover, 0);
 
-        let (allocations, leftover) = allocate_payment(1_000, &outstanding);
+        let (allocations, leftover) = allocate_payment(1_000, "IQD", 1_000_000, &outstanding);
         assert_eq!(allocations.iter().map(|a| a.amount).sum::<i64>(), 300);
         assert_eq!(leftover, 700);
+    }
+
+    #[test]
+    fn convert_currency_is_a_no_op_for_matching_currencies() {
+        assert_eq!(convert_currency(12_345, "IQD", "IQD", 1), 12_345);
+        assert_eq!(convert_currency(12_345, "USD", "USD", 1), 12_345);
+    }
+
+    #[test]
+    fn convert_currency_round_trips_at_a_clean_rate() {
+        // 1,500 IQD per 1 USD.
+        let rate = 1_500_000_000;
+        assert_eq!(convert_currency(100, "USD", "IQD", rate), 1_500); // $1.00 -> 1,500 IQD
+        assert_eq!(convert_currency(1_500, "IQD", "USD", rate), 100); // 1,500 IQD -> $1.00
+    }
+
+    #[test]
+    fn allocation_converts_across_a_currency_boundary() {
+        // 1,500 IQD per 1 USD.
+        let rate = 1_500_000_000;
+        let outstanding = vec![
+            OutstandingInstallment { id: 1, remaining: 10_000, currency: "IQD".into() }, // due first
+            OutstandingInstallment { id: 2, remaining: 200, currency: "USD".into() },    // $2.00, due second
+        ];
+
+        // Pay $10.00 in USD: covers the 10,000 IQD installment in full
+        // (worth $6.67 at this rate), then the $2.00 USD installment in
+        // full, leaving $1.33 unallocated.
+        let (allocations, leftover) = allocate_payment(1_000, "USD", rate, &outstanding);
+
+        assert_eq!(allocations.len(), 2);
+        assert_eq!(allocations[0].installment_id, 1);
+        assert_eq!(allocations[0].amount, 10_000); // stored in the installment's own currency (IQD)
+        assert_eq!(allocations[1].installment_id, 2);
+        assert_eq!(allocations[1].amount, 200); // stored in USD cents
+        assert_eq!(leftover, 133); // $1.33 left over, in the payment's currency (USD)
+    }
+
+    #[test]
+    fn allocation_fully_absorbed_by_one_installment_has_no_rounding_leftover() {
+        // 1,310 IQD per 1 USD - a rate that doesn't divide evenly.
+        let rate = 1_310_000_000;
+        let outstanding = vec![OutstandingInstallment {
+            id: 1,
+            remaining: 1_000_000, // far more than the payment can cover
+            currency: "IQD".into(),
+        }];
+
+        let (allocations, leftover) = allocate_payment(500, "USD", rate, &outstanding);
+
+        assert_eq!(allocations.len(), 1);
+        assert_eq!(allocations[0].amount, convert_currency(500, "USD", "IQD", rate));
+        assert_eq!(leftover, 0);
     }
 }

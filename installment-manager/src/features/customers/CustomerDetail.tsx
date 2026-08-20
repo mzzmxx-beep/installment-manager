@@ -77,7 +77,7 @@ export function CustomerDetail({ customerId, onBack }: { customerId: number; onB
       setAmount("");
       if (result.unallocated_amount > 0) {
         setError(
-          `تم توزيع الدفعة، وتبقى مبلغ ${formatMoney(result.unallocated_amount, currency)} لم يُخصَّص لعدم وجود أقساط مستحقة بنفس العملة.`,
+          `تم توزيع الدفعة، وتبقى مبلغ ${formatMoney(result.unallocated_amount, currency)} لم يُخصَّص (لا توجد أقساط مستحقة متبقية، أو المبلغ يتجاوز إجمالي المستحق).`,
         );
       }
       await load();
@@ -206,7 +206,7 @@ export function CustomerDetail({ customerId, onBack }: { customerId: number; onB
                 />
               </div>
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="pay-rate">سعر الصرف اليدوي</Label>
+                <Label htmlFor="pay-rate">سعر الصرف اليدوي (دينار مقابل دولار واحد)</Label>
                 <Input
                   id="pay-rate"
                   type="number"
@@ -222,7 +222,7 @@ export function CustomerDetail({ customerId, onBack }: { customerId: number; onB
                 تسجيل الدفعة
               </Button>
               <p className="text-xs text-muted-foreground">
-                يتم توزيع الدفعة تلقائياً على أقدم الأقساط غير المسددة بنفس العملة.
+                يتم توزيع الدفعة تلقائياً على أقدم الأقساط غير المسددة من كل العملات، مع تحويل المبلغ حسب سعر الصرف أعلاه عند الحاجة.
               </p>
             </form>
           </CardContent>
