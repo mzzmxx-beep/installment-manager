@@ -2,6 +2,7 @@ mod audit;
 mod commands;
 mod db;
 mod engine;
+pub mod licensing;
 mod models;
 mod repo;
 
@@ -21,6 +22,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::customer::create_customer,
             commands::customer::get_customers,
+            commands::license::validate_license,
+            commands::license::activate_license,
             commands::product::create_product,
             commands::product::get_active_products,
             commands::sale::create_credit_sale,

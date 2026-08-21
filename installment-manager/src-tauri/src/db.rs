@@ -16,6 +16,7 @@ fn migrations() -> Migrations<'static> {
     Migrations::new(vec![
         M::up(include_str!("../migrations/0001_init.sql")),
         M::up(include_str!("../migrations/0002_guarantor_is_a_customer.sql")),
+        M::up(include_str!("../migrations/0003_license_activation.sql")),
     ])
 }
 

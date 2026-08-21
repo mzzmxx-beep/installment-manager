@@ -160,3 +160,34 @@ pub struct PaymentDto {
     pub allocations: Vec<PaymentAllocationDto>,
     pub unallocated_amount: i64,
 }
+
+/// Request DTO for activating a license (ARCHITECTURE.md §7).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActivateLicensePayload {
+    pub license_key: String,
+}
+
+/// Result of checking or activating a license — the frontend gates the
+/// entire app on this (only `Valid` allows normal use).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "state")]
+pub enum LicenseStatus {
+    NotActivated,
+    Valid {
+        customer_name: String,
+        expires_at: Option<String>,
+    },
+    Expired {
+        customer_name: String,
+        expires_at: String,
+    },
+    /// Covers a malformed/unsigned key, a signature that doesn't match the
+    /// embedded public key, or a HWID that doesn't match the one this
+    /// license was activated against.
+    Invalid {
+        reason: String,
+    },
+    /// The OS clock is behind the last recorded successful run — refuses
+    /// to proceed regardless of an otherwise-valid license (ARCHITECTURE.md §7).
+    ClockRollbackDetected,
+}

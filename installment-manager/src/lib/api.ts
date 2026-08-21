@@ -4,6 +4,13 @@ export type CurrencyCode = "IQD" | "USD";
 export type MarkupType = "flat" | "percentage";
 export type InstallmentStatus = "Pending" | "Partial" | "Paid";
 
+export type LicenseStatus =
+  | { state: "NotActivated" }
+  | { state: "Valid"; customer_name: string; expires_at: string | null }
+  | { state: "Expired"; customer_name: string; expires_at: string }
+  | { state: "Invalid"; reason: string }
+  | { state: "ClockRollbackDetected" };
+
 export interface Customer {
   id: number;
   name: string;
@@ -125,4 +132,12 @@ export function registerPayment(payload: {
   manual_exchange_rate_micros: number;
 }): Promise<Payment> {
   return invoke("register_payment", { payload });
+}
+
+export function validateLicense(): Promise<LicenseStatus> {
+  return invoke("validate_license");
+}
+
+export function activateLicense(licenseKey: string): Promise<LicenseStatus> {
+  return invoke("activate_license", { payload: { license_key: licenseKey } });
 }
