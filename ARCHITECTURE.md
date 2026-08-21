@@ -13,8 +13,8 @@ enforcement. No backend server, no internet dependency for core operation.
   Tailwind CSS, components from Shadcn UI.
 - **Desktop Wrapper & Backend:** Tauri 2.x (Rust). All business logic,
   database access, and licensing logic live in Rust.
-- **Database:** SQLite, embedded, managed exclusively by Rust (via
-  `rusqlite` or `sqlx` — decided in Phase 2).
+- **Database:** SQLite, embedded, managed exclusively by Rust — `rusqlite`
+  (bundled feature) + `rusqlite_migration`.
 - **Package manager:** pnpm (strict mode — no phantom dependencies).
 
 ## 3. Architecture Rule: Strict Decoupling
@@ -52,41 +52,72 @@ write (e.g. a sale plus its installments) in a single SQLite
 transaction — partial writes must never be observable.
 
 ### System & Licensing
-- `validate_license()` — checks the cryptographic HWID license and the
-  anti-time-tampering timestamp (§7); returns the current lock state.
-- `activate_license(key: String)` — decrypts, validates, and persists a
-  new license key.
+- `validate_license()` — re-verifies the currently activated license's
+  signature, HWID binding, expiry, and the anti-time-tampering
+  timestamp (§7); returns a `LicenseStatus` (`NotActivated` / `Valid` /
+  `Expired` / `Invalid` / `ClockRollbackDetected`). Called on every app
+  startup; the frontend gates the entire UI behind this.
+- `activate_license(payload: { license_key })` — verifies a new license
+  string, binds it to this machine's HWID, and persists it (replacing
+  any previous activation), returning the same `LicenseStatus`.
 
-### Customer & Guarantor
+### Customer
 - `create_customer(payload)` / `get_customers(search_term)`
-- `create_guarantor(payload)` / `get_guarantors(search_term)`
+- There is no separate Guarantor entity or command set. A guarantor is
+  just another `Customer` row — `CreditSale.guarantor_id` references
+  `Customer(id)` directly (see §8).
 
 ### Product
 - `create_product(payload)`
-- `get_active_products()` — populates the sale flow's product dropdowns.
+- `get_active_products()` — populates the sale flow's product dropdowns,
+  which may mix IQD- and USD-priced products in a single sale.
 
 ### Sales & Financial Engine (strictly transactional)
 - `create_credit_sale(payload)` — opens a SQLite transaction: inserts
   `CreditSale`, inserts each `CreditSaleItem` (snapshotting
-  `snapshot_cash_price`), computes the installment schedule with integer
-  math (remainder folded into the final installment, per §5), inserts
+  `snapshot_cash_price` — converted into the sale's own currency first,
+  via that sale's manual exchange rate, if the product is priced in the
+  other currency), computes the installment schedule with integer math
+  (remainder folded into the final installment, per §5), inserts
   the `Installment` rows, then commits. Any failure rolls back the
-  entire sale — a half-written sale must never be visible.
+  entire sale — a half-written sale must never be visible. Rejects a
+  customer guaranteeing their own sale.
 
 ### Payment Engine (strictly transactional)
 - `register_payment(payload)` — opens a SQLite transaction: inserts the
   `Payment` row (with its own manual exchange rate), then runs an
-  allocation algorithm that walks the sale's unpaid installments
-  oldest-first and inserts `PaymentAllocation` rows until the payment
-  amount is fully distributed, then commits.
+  allocation algorithm that walks *all* of the customer's unpaid
+  installments oldest-first — regardless of which currency each
+  underlying sale is in, converting via this payment's own manual
+  exchange rate when they differ — and inserts `PaymentAllocation` rows
+  until the payment amount is fully distributed, then commits. Any
+  leftover (overpayment, or nothing outstanding) is reported back
+  rather than dropped.
 
 ### Reporting & Dashboards
-- `get_customer_statement(customer_id)` — derives total debt and
-  remaining balance by joining `CreditSale` → `Installment` →
-  `PaymentAllocation`; there is no stored balance column to read (§8).
+- `get_customer_statement(customer_id)` — a customer's full sales +
+  payments history, plus outstanding balance per currency, derived
+  fresh from `Installment`/`PaymentAllocation` every call; there is no
+  stored balance column to read (§8).
 - `get_overdue_installments(current_date)` — returns installments where
   `due_date < current_date` and
   `sum(PaymentAllocation.allocated_amount) < scheduled_amount`.
+
+### Analytics (business-wide, beyond the original plan)
+- `get_sales_summary(from_date?, to_date?)` — per-currency sale count,
+  cash value, markup (profit), installment value, collected, and
+  outstanding, optionally scoped to a date range.
+- `get_top_products(limit)` — best-selling products by quantity, with
+  revenue per currency.
+- `get_top_customers(limit)` — customers ranked by number of completed
+  sales.
+- `get_most_overdue_customers(current_date, limit)` — customers ranked
+  by their longest-overdue installment.
+- `get_customers_overview()` — every customer's sale count, purchased
+  and remaining totals per currency, and last sale date.
+- All money aggregates that could span both currencies return a list of
+  `{ currency_code, amount }` rather than a single number — there is no
+  invented "reporting exchange rate" anywhere in the app.
 
 Every command above returns typed DTOs, never raw table rows (§3).
 
@@ -122,6 +153,17 @@ Every command above returns typed DTOs, never raw table rows (§3).
   the transaction. There is no hardcoded or auto-fetched rate anywhere
   in the system — IQD/USD volatility is handled per-transaction by the
   user.
+- **Cross-Currency Conversion:** stored as `manual_exchange_rate_micros`
+  — IQD per 1 USD, scaled by 1,000,000 (e.g. 1,310.25 IQD/USD →
+  `1310250000`). Used in two places, always with the *current
+  transaction's own* rate, never a global one: (1) a sale's items may
+  be priced in either currency — a product's price is converted into
+  the sale's currency before being summed into `cash_total`; (2) a
+  payment may be in either currency — installments in the other
+  currency are converted using that payment's rate as the payment is
+  allocated across them oldest-first. `PaymentAllocation.allocated_amount`
+  is always stored in the *installment's* currency (never the
+  payment's), since it's summed directly against `scheduled_amount`.
 
 ## 6. Immutability Rule
 
@@ -133,37 +175,66 @@ Every command above returns typed DTOs, never raw table rows (§3).
 
 ## 7. Offline Licensing System
 
-Implemented entirely in Rust (Tauri backend), no network calls required
-for verification.
+Implemented entirely in Rust (`src-tauri/src/licensing.rs`), no network
+calls anywhere in the licensing path.
 
-- **Asymmetric Cryptography:** a keypair is generated once, offline, by
-  the vendor. The **private key never ships**; the **public key is
-  embedded in the compiled binary**. License keys/files are signed with
-  the private key and verified in-app with the embedded public key
-  (candidate crate: `ed25519-dalek`).
-- **HWID Binding:** at activation, Rust computes a stable hash derived
-  from the machine's CPU ID and motherboard serial number (e.g. via
-  `raw-cpuid` and platform WMI queries on Windows). The license is bound
-  to this hash; it refuses to validate on a different machine.
-- **Anti-Time-Tampering:** Rust persists an encrypted
-  `last_execution_timestamp` in SQLite on every run. On startup, the
-  current OS time is compared against this stored value:
+- **Asymmetric Cryptography (`ed25519-dalek`):** a keypair is generated
+  once, offline, by the vendor, via `cargo run --bin keygen`. The
+  **private key never ships and is never committed** — it lives in a
+  file (`vendor_private_key.b64`) kept outside the repo entirely,
+  currently at `C:\Users\mahmoodsaad\OneDrive\0001- الاقساط\installment-manager-vendor-key\`
+  (rotated once after an earlier copy under a different, cross-profile
+  path silently disappeared — see that folder's README.txt for the
+  full note). The **public key is embedded in the compiled binary**
+  (`licensing::PUBLIC_KEY_BYTES`). A license is the string
+  `base64(payload json).base64(signature)`; `verify_license` always
+  re-parses and re-verifies from that raw string rather than trusting
+  any separately-stored field, so tampering with an individual DB
+  column can't forge a license.
+  - `src-tauri/src/bin/issue_license.rs` is the vendor-facing tool that
+    signs a new license from the private key: scriptable
+    (`issue_license <key-path> "<name>" [--days N]`) or interactive
+    (no args — finds the key file next to itself, prompts for the
+    rest). Its own prompts are English-only on purpose: it's
+    developer-only, never shown to a customer, and the legacy Windows
+    console can't shape Arabic text correctly even with a UTF-8
+    codepage.
+- **HWID Binding:** at activation, Rust computes a stable hash (SHA-256)
+  derived from the machine's CPU `ProcessorId`, motherboard serial
+  number, and the Windows machine GUID — fetched in a single
+  PowerShell/CIM call (console window suppressed) rather than
+  `raw-cpuid`. The license is bound to this hash; it refuses to
+  validate on a different machine.
+- **Anti-Time-Tampering:** Rust persists an AES-256-GCM–encrypted
+  `last_execution_timestamp` in the `license_activation` table (key
+  derived from the HWID, so the ciphertext isn't portable to another
+  machine) on every successful validation. On startup, the current OS
+  time is compared against this stored value:
   - if `current_time < last_execution_timestamp`, the app locks down
-    immediately (refuses to proceed) — this catches users rolling the
-    system clock back to defeat trial/expiry logic.
-  - the stored timestamp is updated on every successful run.
+    immediately (refuses to proceed, no way to dismiss it from the UI)
+    — this catches users rolling the system clock back to defeat
+    trial/expiry logic. The stored timestamp is deliberately **not**
+    updated in this case.
+  - otherwise, the stored timestamp is updated to the current time.
+- **Frontend gate:** `App.tsx` mounts everything under `LicenseGate`
+  (`src/features/license/LicenseGate.tsx`), which calls
+  `validate_license()` on load and renders an activation form (not
+  activated / invalid / expired) or the hard lockdown screen instead of
+  the app until the license checks out.
 
 ## 8. Database Schema & Entities
 
 Field-level specification (exact SQL types/constraints refined in Phase 2,
 but the fields, semantics, and rules below are binding):
 
-### Customer & Guarantor
+### Customer
 - `Customer`: `id`, `name`, `phone`, `national_id`, `address`, `created_at`.
-- `Guarantor`: `id`, `name`, `phone`, `national_id`, `address`, `created_at`.
-- `national_id` is sensitive PII on both tables — enforce strict
-  constraints (required, unique) and treat it as restricted data in any
-  future export/reporting feature.
+- `national_id` is sensitive PII — enforce strict constraints (required,
+  unique) and treat it as restricted data in any future export/reporting
+  feature.
+- There is **no separate `Guarantor` table** (removed via migration
+  `0002`, which retargeted `CreditSale.guarantor_id` onto `Customer(id)`
+  — see below). A guarantor is just another customer.
 
 ### Product (Reference Only)
 - `Product`: `id`, `name`, `reference_cash_price` (INTEGER),
@@ -173,13 +244,17 @@ but the fields, semantics, and rules below are binding):
   snapshot on `CreditSaleItem`.
 
 ### CreditSale & CreditSaleItem (The Immutable Snapshot)
-- `CreditSale`: `id`, `customer_id`, `guarantor_id`, `sale_date`,
-  `agreed_months` (INTEGER), `applied_markup_value` (INTEGER — the
-  resolved exact amount, not a percentage), `total_installment_price`
-  (INTEGER), `currency_code`, `manual_exchange_rate` (INTEGER/TEXT for
-  precision).
+- `CreditSale`: `id`, `customer_id`, `guarantor_id` (nullable FK to
+  **`Customer`**, not a separate table — must differ from
+  `customer_id`), `sale_date`, `agreed_months` (INTEGER),
+  `applied_markup_value` (INTEGER — the resolved exact amount, not a
+  percentage), `total_installment_price` (INTEGER), `currency_code`,
+  `manual_exchange_rate_micros` (INTEGER, IQD per 1 USD ×1,000,000).
 - `CreditSaleItem`: `id`, `sale_id`, `product_id`, `snapshot_cash_price`
-  (INTEGER), `quantity`.
+  (INTEGER), `quantity`. No currency column of its own —
+  `snapshot_cash_price` is always in the parent `CreditSale`'s
+  currency, converted at creation time from the `Product`'s own
+  currency if they differ (§5).
 - Once a sale is created, these rows are **append-only**. Editing a
   `Product`'s price later must never alter an existing
   `snapshot_cash_price`. There is no separate `InstallmentPlan` table —
@@ -196,8 +271,9 @@ but the fields, semantics, and rules below are binding):
 
 ### Payment & PaymentAllocation (The Ledger)
 - `Payment`: `id`, `customer_id`, `payment_date`, `amount_paid`
-  (INTEGER), `currency_code` (IQD/USD), `manual_exchange_rate` (required
-  whenever the payment currency differs from the sale currency).
+  (INTEGER), `currency_code` (IQD/USD), `manual_exchange_rate_micros`
+  (used whenever any of this customer's outstanding installments are in
+  the other currency — §5).
 - `PaymentAllocation`: `id`, `payment_id`, `installment_id`,
   `allocated_amount` (INTEGER).
 - Payments are distributed across specific installments via
@@ -211,14 +287,22 @@ but the fields, semantics, and rules below are binding):
 - `AuditLog`: `id`, `table_name`, `record_id`, `action`
   (INSERT/UPDATE/DELETE), `timestamp`, `old_payload` (JSON),
   `new_payload` (JSON).
-- Populated via Rust command logic or SQLite triggers (decided in
-  Phase 2/4). Strictly append-only, like every other ledger table in
+- Populated via Rust command logic (`audit::log_insert`/`log_update`,
+  one call site per mutating repo function) — decided against SQLite
+  triggers. Strictly append-only, like every other ledger table in
   this system.
+
+### LicenseActivation (§7)
+- `license_activation`: a singleton row (`id` always `1` — activating a
+  new license replaces it), `raw_license` (the full signed license
+  string, re-verified from scratch on every check), `hwid`,
+  `activated_at`, `encrypted_last_execution_ts` (BLOB, AES-256-GCM).
 
 Relationships (indicative): `Customer` 1—N `CreditSale`; `CreditSale`
 1—N `CreditSaleItem`; `CreditSale` 1—N `Installment` (direct
 `sale_id` FK, no intermediate plan table); `Payment` N—N `Installment`
-via `PaymentAllocation`; `CreditSale` N—1 `Guarantor`.
+via `PaymentAllocation`; `CreditSale` N—1 `Customer` (as guarantor, via
+`guarantor_id` — the same table as the buyer, not a distinct entity).
 
 ## 9. Cloud Migration Path (Future)
 
@@ -228,7 +312,34 @@ to **Cloudflare Pages** (static frontend hosting) + **Cloudflare D1**
 requires no frontend rewrite and no business-logic rewrite:
 
 - Tauri Commands → Worker HTTP handlers (same DTOs).
-- `rusqlite`/`sqlx` queries against local SQLite → same SQL against D1
-  (D1 is SQLite-compatible).
+- `rusqlite` queries against local SQLite → same SQL against D1 (D1 is
+  SQLite-compatible).
 - React/Vite frontend deploys to Pages unchanged, swapping its
   `invoke()` calls for `fetch()` calls against the Worker API.
+
+## 10. Distribution & Build
+
+- `pnpm tauri build` (bundle target pinned to `["nsis"]` in
+  `tauri.conf.json` — a plain installable `.exe`; MSI/WiX isn't used).
+  Produces `installment-manager_<version>_x64-setup.exe` under
+  `src-tauri/target/release/bundle/nsis/`.
+- **`"mainBinaryName": "installment-manager"` must stay set** in
+  `tauri.conf.json`. `src-tauri` has three `[[bin]]` targets (the app,
+  plus the dev-only `keygen`/`issue_license` tools under
+  `src-tauri/src/bin/`); without this field, `tauri build`'s default
+  binary-picking heuristic has bundled the *wrong* executable
+  (`issue_license.exe`) into the installer. Confirm any future release
+  build logs `Built application at: ...\installment-manager.exe`
+  before trusting the output.
+- A fresh install carries no data: the SQLite database is created empty
+  in the OS-specific app-local-data directory on first run, entirely
+  separate from the installer package — nothing to strip or reset
+  between builds.
+- On Windows, this bundled SQLite build defaults `PRAGMA foreign_keys`
+  to ON (not SQLite's usual off-by-default) — relevant to any future
+  migration that rebuilds a table (create/copy/drop/rename, needed
+  whenever a `REFERENCES` target changes), which must toggle it off
+  first or the `DROP TABLE` step fails against any database that
+  already has real data in it (`db.rs` handles this for `init_db`/
+  `init_test_db`; a regression test template for this scenario lives at
+  `db::tests::migration_0002_succeeds_against_a_database_with_existing_child_rows`).
