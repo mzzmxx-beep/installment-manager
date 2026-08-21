@@ -1,7 +1,9 @@
 //! Small standalone tool to issue a new signed license for a customer
 //! (ARCHITECTURE.md §7). Meant to be copied next to `vendor_private_key.b64`
 //! and double-clicked — it finds the key automatically and prompts for the
-//! rest.
+//! rest. Developer-facing only (never shipped to customers), so prompts are
+//! in English regardless of the app's own language — the legacy Windows
+//! console can't shape Arabic text correctly even with a UTF-8 codepage.
 //!
 //! Scripted usage still works for automation:
 //!   issue_license <private-key-path> "<customer name>" [--days N]
@@ -32,7 +34,7 @@ fn main() {
     };
 
     if let Err(e) = result {
-        eprintln!("خطأ: {e}");
+        eprintln!("Error: {e}");
         pause_before_exit();
         std::process::exit(1);
     }
@@ -52,30 +54,30 @@ fn run_scripted(args: &[String]) -> Result<(), String> {
 }
 
 fn run_interactive() -> Result<(), String> {
-    println!("=== أداة إصدار تراخيص إدارة الأقساط ===");
+    println!("=== installment-manager license issuer ===");
     println!();
 
     let key_path = find_or_ask_for_key_path()?;
-    println!("مفتاح التوقيع: {}", key_path.display());
+    println!("Signing key: {}", key_path.display());
     println!();
 
     let customer_name = loop {
-        let name = prompt("اسم الزبون: ")?;
+        let name = prompt("Customer name: ")?;
         if !name.trim().is_empty() {
             break name.trim().to_string();
         }
-        println!("الاسم مطلوب، حاول مرة أخرى.");
+        println!("Name is required, try again.");
     };
 
     let days = loop {
-        let input = prompt("عدد أيام صلاحية الترخيص (اتركه فارغاً لترخيص دائم): ")?;
+        let input = prompt("License validity in days (leave blank for a perpetual license): ")?;
         let trimmed = input.trim();
         if trimmed.is_empty() {
             break None;
         }
         match trimmed.parse::<i64>() {
             Ok(n) if n > 0 => break Some(n),
-            _ => println!("أدخل رقم صحيح أكبر من صفر، أو اتركه فارغاً."),
+            _ => println!("Enter a whole number greater than zero, or leave it blank."),
         }
     };
 
@@ -96,19 +98,19 @@ fn find_or_ask_for_key_path() -> Result<PathBuf, String> {
     }
 
     loop {
-        let input = prompt(&format!("لم يُعثر على {KEY_FILENAME} بجانب هذا البرنامج. أدخل مسار الملف: "))?;
+        let input = prompt(&format!("Couldn't find {KEY_FILENAME} next to this program. Enter its path: "))?;
         let path = PathBuf::from(input.trim());
         if path.exists() {
             return Ok(path);
         }
-        println!("الملف غير موجود: {}", path.display());
+        println!("File not found: {}", path.display());
     }
 }
 
 fn issue(key_path: &Path, customer_name: &str, days: Option<i64>) -> Result<(), String> {
-    let key_b64 = fs::read_to_string(key_path).map_err(|e| format!("فشل قراءة مفتاح التوقيع {}: {e}", key_path.display()))?;
-    let key_bytes = B64.decode(key_b64.trim()).map_err(|_| "ملف المفتاح ليس base64 صالحاً".to_string())?;
-    let key_array: [u8; 32] = key_bytes.try_into().map_err(|_| "المفتاح يجب أن يكون 32 بايت".to_string())?;
+    let key_b64 = fs::read_to_string(key_path).map_err(|e| format!("Failed to read signing key {}: {e}", key_path.display()))?;
+    let key_bytes = B64.decode(key_b64.trim()).map_err(|_| "Key file is not valid base64".to_string())?;
+    let key_array: [u8; 32] = key_bytes.try_into().map_err(|_| "Key must be 32 bytes".to_string())?;
     let signing_key = SigningKey::from_bytes(&key_array);
 
     let now = Utc::now();
@@ -125,16 +127,13 @@ fn issue(key_path: &Path, customer_name: &str, days: Option<i64>) -> Result<(), 
         .parent()
         .unwrap_or_else(|| Path::new("."))
         .join(format!("{}.license", sanitize_filename(customer_name)));
-    fs::write(&output_path, &license_string).map_err(|e| format!("فشل حفظ ملف الترخيص: {e}"))?;
+    fs::write(&output_path, &license_string).map_err(|e| format!("Failed to save license file: {e}"))?;
 
-    println!("تم إصدار الترخيص للزبون: {customer_name}");
-    println!(
-        "تاريخ الانتهاء: {}",
-        payload.expires_at.as_deref().unwrap_or("لا يوجد (ترخيص دائم)")
-    );
-    println!("حُفظ بالملف: {}", output_path.display());
+    println!("License issued for: {customer_name}");
+    println!("Expires: {}", payload.expires_at.as_deref().unwrap_or("never (perpetual)"));
+    println!("Saved to: {}", output_path.display());
     println!();
-    println!("رمز الترخيص (يُلصق بشاشة تفعيل التطبيق):");
+    println!("License key (paste into the app's activation screen):");
     println!("{license_string}");
     Ok(())
 }
@@ -149,7 +148,7 @@ fn prompt(message: &str) -> Result<String, String> {
 
 fn pause_before_exit() {
     println!();
-    let _ = prompt("اضغط Enter للخروج...");
+    let _ = prompt("Press Enter to exit...");
 }
 
 fn hex_random(bytes: usize) -> String {
@@ -165,9 +164,10 @@ fn sanitize_filename(name: &str) -> String {
         .collect()
 }
 
-/// Switches the console's input/output codepage to UTF-8 so Arabic prompts
-/// and customer names display and read back correctly — Windows consoles
-/// otherwise default to a legacy ANSI codepage.
+/// Switches the console's input codepage to UTF-8. Prompts are English, but
+/// a customer name typed here could still be Arabic — this keeps that
+/// input captured correctly as UTF-8 even though the legacy console can't
+/// render Arabic shaping properly while typing it.
 #[cfg(windows)]
 fn enable_utf8_console() {
     #[link(name = "kernel32")]
