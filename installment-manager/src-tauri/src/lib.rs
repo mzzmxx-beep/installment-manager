@@ -29,6 +29,8 @@ pub fn run() {
             commands::sale::create_credit_sale,
             commands::sale::get_sales_for_customer,
             commands::payment::register_payment,
+            commands::reporting::get_customer_statement,
+            commands::reporting::get_overdue_installments,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

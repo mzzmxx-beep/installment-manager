@@ -149,6 +149,56 @@ pub fn register_payment(conn: &mut Connection, payload: CreatePaymentPayload) ->
     Ok(dto)
 }
 
+/// Lists a customer's payments, newest first, each with its allocations
+/// inlined. Used by the customer statement report.
+pub fn get_payments_for_customer(conn: &Connection, customer_id: i64) -> rusqlite::Result<Vec<PaymentDto>> {
+    let mut payment_stmt = conn.prepare(
+        "SELECT id, customer_id, payment_date, amount_paid, currency_code, manual_exchange_rate_micros, created_at
+         FROM payment
+         WHERE customer_id = ?1
+         ORDER BY payment_date DESC, id DESC",
+    )?;
+    let payments = payment_stmt
+        .query_map(params![customer_id], |row| {
+            Ok(PaymentDto {
+                id: row.get(0)?,
+                customer_id: row.get(1)?,
+                payment_date: row.get(2)?,
+                amount_paid: row.get(3)?,
+                currency_code: row.get(4)?,
+                manual_exchange_rate_micros: row.get(5)?,
+                created_at: row.get(6)?,
+                allocations: Vec::new(),
+                // Not reconstructed for historical listings: it was
+                // reported once at creation time and isn't stored anywhere
+                // to look up later (ARCHITECTURE.md §8 — no cached balances).
+                unallocated_amount: 0,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    let mut allocation_stmt = conn.prepare(
+        "SELECT id, payment_id, installment_id, allocated_amount FROM payment_allocation WHERE payment_id = ?1",
+    )?;
+    let mut result = Vec::with_capacity(payments.len());
+    for mut payment in payments {
+        let allocations = allocation_stmt
+            .query_map(params![payment.id], |row| {
+                Ok(PaymentAllocationDto {
+                    id: row.get(0)?,
+                    payment_id: row.get(1)?,
+                    installment_id: row.get(2)?,
+                    allocated_amount: row.get(3)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        payment.allocations = allocations;
+        result.push(payment);
+    }
+
+    Ok(result)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

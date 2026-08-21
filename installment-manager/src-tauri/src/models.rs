@@ -191,3 +191,39 @@ pub enum LicenseStatus {
     /// to proceed regardless of an otherwise-valid license (ARCHITECTURE.md §7).
     ClockRollbackDetected,
 }
+
+/// Total outstanding balance in one currency — a customer can owe in both
+/// at once, so this is never collapsed into a single number.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CurrencyBalanceDto {
+    pub currency_code: String,
+    pub total_remaining: i64,
+}
+
+/// Full transaction history and derived balance for one customer
+/// (ARCHITECTURE.md §4) — every sale and every payment they've ever made,
+/// plus the outstanding balance per currency. Balances are always derived
+/// from `Installment`/`PaymentAllocation` at query time, never read from a
+/// cached column (ARCHITECTURE.md §8).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CustomerStatementDto {
+    pub customer: CustomerDto,
+    pub sales: Vec<CreditSaleDto>,
+    pub payments: Vec<PaymentDto>,
+    pub balances: Vec<CurrencyBalanceDto>,
+}
+
+/// One overdue installment for the overdue dashboard (ARCHITECTURE.md §4):
+/// `due_date < current_date` and still short of `scheduled_amount`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OverdueInstallmentDto {
+    pub installment_id: i64,
+    pub sale_id: i64,
+    pub customer_id: i64,
+    pub customer_name: String,
+    pub due_date: String,
+    pub days_overdue: i64,
+    pub currency_code: String,
+    pub scheduled_amount: i64,
+    pub remaining_amount: i64,
+}
