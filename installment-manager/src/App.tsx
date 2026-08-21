@@ -3,6 +3,8 @@ import { CustomerDetail } from "@/features/customers/CustomerDetail";
 import { CustomersPage } from "@/features/customers/CustomersPage";
 import { LicenseGate } from "@/features/license/LicenseGate";
 import { ProductsPage } from "@/features/products/ProductsPage";
+import { CustomerStatement } from "@/features/reporting/CustomerStatement";
+import { OverduePage } from "@/features/reporting/OverduePage";
 import { NewSalePage } from "@/features/sales/NewSalePage";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -11,16 +13,29 @@ type View =
   | { tab: "customers" }
   | { tab: "products" }
   | { tab: "new-sale" }
-  | { tab: "customer-detail"; customerId: number };
+  | { tab: "overdue" }
+  | { tab: "customer-detail"; customerId: number }
+  | { tab: "customer-statement"; customerId: number };
 
-const TABS: { tab: "customers" | "products" | "new-sale"; label: string }[] = [
+const TABS: { tab: "customers" | "products" | "new-sale" | "overdue"; label: string }[] = [
   { tab: "customers", label: "العملاء" },
   { tab: "products", label: "المنتجات" },
   { tab: "new-sale", label: "بيع جديد" },
+  { tab: "overdue", label: "المتأخرات" },
 ];
 
 function App() {
   const [view, setView] = useState<View>({ tab: "customers" });
+
+  // The statement is a standalone printable page, deliberately outside the
+  // normal header/nav shell so nothing but the statement itself can print.
+  if (view.tab === "customer-statement") {
+    return (
+      <LicenseGate>
+        <CustomerStatement customerId={view.customerId} onBack={() => setView({ tab: "customer-detail", customerId: view.customerId })} />
+      </LicenseGate>
+    );
+  }
 
   const activeTab = view.tab === "customer-detail" ? "customers" : view.tab;
 
@@ -53,8 +68,15 @@ function App() {
           {view.tab === "new-sale" && (
             <NewSalePage onCreated={(customerId) => setView({ tab: "customer-detail", customerId })} />
           )}
+          {view.tab === "overdue" && (
+            <OverduePage onSelectCustomer={(id) => setView({ tab: "customer-detail", customerId: id })} />
+          )}
           {view.tab === "customer-detail" && (
-            <CustomerDetail customerId={view.customerId} onBack={() => setView({ tab: "customers" })} />
+            <CustomerDetail
+              customerId={view.customerId}
+              onBack={() => setView({ tab: "customers" })}
+              onViewStatement={() => setView({ tab: "customer-statement", customerId: view.customerId })}
+            />
           )}
         </main>
       </div>

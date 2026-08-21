@@ -141,3 +141,35 @@ export function validateLicense(): Promise<LicenseStatus> {
 export function activateLicense(licenseKey: string): Promise<LicenseStatus> {
   return invoke("activate_license", { payload: { license_key: licenseKey } });
 }
+
+export interface CurrencyBalance {
+  currency_code: CurrencyCode;
+  total_remaining: number;
+}
+
+export interface CustomerStatement {
+  customer: Customer;
+  sales: CreditSale[];
+  payments: Payment[];
+  balances: CurrencyBalance[];
+}
+
+export interface OverdueInstallment {
+  installment_id: number;
+  sale_id: number;
+  customer_id: number;
+  customer_name: string;
+  due_date: string;
+  days_overdue: number;
+  currency_code: CurrencyCode;
+  scheduled_amount: number;
+  remaining_amount: number;
+}
+
+export function getCustomerStatement(customerId: number): Promise<CustomerStatement> {
+  return invoke("get_customer_statement", { customerId });
+}
+
+export function getOverdueInstallments(currentDate: string): Promise<OverdueInstallment[]> {
+  return invoke("get_overdue_installments", { currentDate });
+}

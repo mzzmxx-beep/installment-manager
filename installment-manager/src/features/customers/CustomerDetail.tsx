@@ -22,7 +22,15 @@ function statusBadge(status: InstallmentStatus) {
   return <Badge>غير مسدد</Badge>;
 }
 
-export function CustomerDetail({ customerId, onBack }: { customerId: number; onBack: () => void }) {
+export function CustomerDetail({
+  customerId,
+  onBack,
+  onViewStatement,
+}: {
+  customerId: number;
+  onBack: () => void;
+  onViewStatement: () => void;
+}) {
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [sales, setSales] = useState<CreditSale[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -90,9 +98,12 @@ export function CustomerDetail({ customerId, onBack }: { customerId: number; onB
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-center gap-3">
+      <div className="flex items-center justify-between gap-3">
         <Button variant="ghost" size="sm" onClick={onBack}>
           ← رجوع للعملاء
+        </Button>
+        <Button variant="outline" size="sm" onClick={onViewStatement}>
+          عرض كشف الحساب
         </Button>
       </div>
 
