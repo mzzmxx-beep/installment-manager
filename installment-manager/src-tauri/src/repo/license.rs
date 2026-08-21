@@ -174,7 +174,7 @@ mod tests {
     #[test]
     fn activate_then_validate_a_real_perpetual_license_succeeds() {
         let conn = init_test_db();
-        let raw = "eyJsaWNlbnNlX2lkIjoiTElDLTA0ZjdmOTJhNDk1ZTBiNDMiLCJjdXN0b21lcl9uYW1lIjoiUGVycGV0dWFsIFRlc3QgQ28iLCJpc3N1ZWRfYXQiOiIyMDI2LTA4LTIxIiwiZXhwaXJlc19hdCI6bnVsbH0=.CtIpNobfr2mtGjNRGamOSJ22PBHRpCFioZIx0FsOE1J1RxN+Cgf2RYgpeOn7Nq/5VPA1RVv1iBFGfWDI0WPNCA==";
+        let raw = "eyJsaWNlbnNlX2lkIjoiTElDLWQxMGU0NDIwMjg4OTdiNjciLCJjdXN0b21lcl9uYW1lIjoiUGVycGV0dWFsIFRlc3QgQ28iLCJpc3N1ZWRfYXQiOiIyMDI2LTA4LTIxIiwiZXhwaXJlc19hdCI6bnVsbH0=.n6VoM77V041b16qOyzcF2rEY5ljGqm58I1R0PEcTYhmJyCHyyThey5GtLU82C0scT2Frh6qk+uqbIDaHn2xZAA==";
 
         let activate_status = activate_license(&conn, raw).unwrap();
         assert_eq!(

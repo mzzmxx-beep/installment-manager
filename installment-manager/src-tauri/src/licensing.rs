@@ -25,8 +25,8 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 /// `src-tauri/src/bin/keygen.rs`. Safe to embed and commit — verifying a
 /// signature only requires the public half.
 pub const PUBLIC_KEY_BYTES: [u8; 32] = [
-    70, 234, 203, 244, 109, 1, 101, 224, 0, 89, 183, 108, 71, 21, 68, 117, 129, 92, 18, 168, 179, 21, 87, 231, 197,
-    143, 36, 199, 43, 200, 105, 37,
+    206, 88, 187, 1, 76, 183, 1, 64, 144, 255, 104, 186, 225, 124, 27, 253, 110, 106, 68, 207, 74, 183, 153, 9, 160,
+    11, 82, 231, 215, 45, 80, 108,
 ];
 
 /// The signed payload of a license. Field order is the canonical
@@ -202,7 +202,7 @@ mod tests {
     /// private key have drifted apart.
     #[test]
     fn verifies_a_real_license_issued_by_the_actual_vendor_key() {
-        let raw = "eyJsaWNlbnNlX2lkIjoiTElDLWNhNzA0MGVmYjg0OTI0OWYiLCJjdXN0b21lcl9uYW1lIjoiVGVzdCBDdXN0b21lciIsImlzc3VlZF9hdCI6IjIwMjYtMDgtMjEiLCJleHBpcmVzX2F0IjoiMjAyNi0wOS0yMCJ9.qYk3x9MhSFhdqwh8k/rRStceq+PmQYReRRIGhwdcuf7oEwQRm2YPhGRPJUFsXQuAqu9huvudGxiIjvxEBZGrBQ==";
+        let raw = "eyJsaWNlbnNlX2lkIjoiTElDLTQyY2VlYjcwOWZmYTc5ODMiLCJjdXN0b21lcl9uYW1lIjoiVGVzdCBDdXN0b21lciIsImlzc3VlZF9hdCI6IjIwMjYtMDgtMjEiLCJleHBpcmVzX2F0IjoiMjAyNi0wOS0yMCJ9.kACNdrC7vmh6L7gosHY8Qr7U9GACy3dyS2nKkng5/y1HLKfxtZN7c46A7E4hVS8/t0MO79Un6wm090HHnmc8BQ==";
         let payload = verify_license(raw).expect("real issued license must verify");
         assert_eq!(payload.customer_name, "Test Customer");
         assert_eq!(payload.issued_at, "2026-08-21");
