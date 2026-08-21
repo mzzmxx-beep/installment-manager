@@ -1,3 +1,4 @@
+pub mod analytics;
 pub mod customer;
 pub mod license;
 pub mod payment;

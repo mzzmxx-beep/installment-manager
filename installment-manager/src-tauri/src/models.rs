@@ -227,3 +227,70 @@ pub struct OverdueInstallmentDto {
     pub scheduled_amount: i64,
     pub remaining_amount: i64,
 }
+
+/// A monetary amount in one currency — the generic building block for
+/// analytics aggregates, which can span both currencies at once and are
+/// therefore never collapsed into a single number.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CurrencyAmountDto {
+    pub currency_code: String,
+    pub amount: i64,
+}
+
+/// Sales and profit totals for one currency over an optional date range.
+/// `total_markup` is the profit (cash price + markup = installment price,
+/// so markup is exactly the margin); `total_collected`/`total_outstanding`
+/// reflect what's been paid so far on sales made in the period, regardless
+/// of when the payment itself landed.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SalesSummaryDto {
+    pub currency_code: String,
+    pub sale_count: i64,
+    pub total_cash_value: i64,
+    pub total_markup: i64,
+    pub total_installment_value: i64,
+    pub total_collected: i64,
+    pub total_outstanding: i64,
+}
+
+/// One product's sales ranking: units moved and revenue (cash value sold,
+/// not counting markup, which is a sale-level not item-level figure).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProductSalesDto {
+    pub product_id: i64,
+    pub product_name: String,
+    pub total_quantity: i64,
+    pub revenue_by_currency: Vec<CurrencyAmountDto>,
+}
+
+/// One customer's ranking by number of completed sales.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CustomerRankingDto {
+    pub customer_id: i64,
+    pub customer_name: String,
+    pub sale_count: i64,
+    pub total_purchased_by_currency: Vec<CurrencyAmountDto>,
+}
+
+/// One customer's overdue standing, aggregated across every overdue
+/// installment they have (possibly spanning both currencies).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CustomerOverdueRankingDto {
+    pub customer_id: i64,
+    pub customer_name: String,
+    pub overdue_installment_count: i64,
+    pub max_days_overdue: i64,
+    pub overdue_amount_by_currency: Vec<CurrencyAmountDto>,
+}
+
+/// One row of the all-customers overview: activity and standing summary,
+/// complementing the single-customer statement (`CustomerStatementDto`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CustomerOverviewDto {
+    pub customer_id: i64,
+    pub customer_name: String,
+    pub sale_count: i64,
+    pub total_purchased_by_currency: Vec<CurrencyAmountDto>,
+    pub total_remaining_by_currency: Vec<CurrencyAmountDto>,
+    pub last_sale_date: Option<String>,
+}

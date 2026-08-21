@@ -173,3 +173,69 @@ export function getCustomerStatement(customerId: number): Promise<CustomerStatem
 export function getOverdueInstallments(currentDate: string): Promise<OverdueInstallment[]> {
   return invoke("get_overdue_installments", { currentDate });
 }
+
+export interface CurrencyAmount {
+  currency_code: CurrencyCode;
+  amount: number;
+}
+
+export interface SalesSummary {
+  currency_code: CurrencyCode;
+  sale_count: number;
+  total_cash_value: number;
+  total_markup: number;
+  total_installment_value: number;
+  total_collected: number;
+  total_outstanding: number;
+}
+
+export interface ProductSales {
+  product_id: number;
+  product_name: string;
+  total_quantity: number;
+  revenue_by_currency: CurrencyAmount[];
+}
+
+export interface CustomerRanking {
+  customer_id: number;
+  customer_name: string;
+  sale_count: number;
+  total_purchased_by_currency: CurrencyAmount[];
+}
+
+export interface CustomerOverdueRanking {
+  customer_id: number;
+  customer_name: string;
+  overdue_installment_count: number;
+  max_days_overdue: number;
+  overdue_amount_by_currency: CurrencyAmount[];
+}
+
+export interface CustomerOverview {
+  customer_id: number;
+  customer_name: string;
+  sale_count: number;
+  total_purchased_by_currency: CurrencyAmount[];
+  total_remaining_by_currency: CurrencyAmount[];
+  last_sale_date: string | null;
+}
+
+export function getSalesSummary(fromDate: string | null, toDate: string | null): Promise<SalesSummary[]> {
+  return invoke("get_sales_summary", { fromDate, toDate });
+}
+
+export function getTopProducts(limit: number): Promise<ProductSales[]> {
+  return invoke("get_top_products", { limit });
+}
+
+export function getTopCustomers(limit: number): Promise<CustomerRanking[]> {
+  return invoke("get_top_customers", { limit });
+}
+
+export function getMostOverdueCustomers(currentDate: string, limit: number): Promise<CustomerOverdueRanking[]> {
+  return invoke("get_most_overdue_customers", { currentDate, limit });
+}
+
+export function getCustomersOverview(): Promise<CustomerOverview[]> {
+  return invoke("get_customers_overview");
+}

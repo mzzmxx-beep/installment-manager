@@ -5,6 +5,7 @@ import { LicenseGate } from "@/features/license/LicenseGate";
 import { ProductsPage } from "@/features/products/ProductsPage";
 import { CustomerStatement } from "@/features/reporting/CustomerStatement";
 import { OverduePage } from "@/features/reporting/OverduePage";
+import { ReportsPage } from "@/features/reporting/ReportsPage";
 import { NewSalePage } from "@/features/sales/NewSalePage";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -14,14 +15,16 @@ type View =
   | { tab: "products" }
   | { tab: "new-sale" }
   | { tab: "overdue" }
+  | { tab: "reports" }
   | { tab: "customer-detail"; customerId: number }
   | { tab: "customer-statement"; customerId: number };
 
-const TABS: { tab: "customers" | "products" | "new-sale" | "overdue"; label: string }[] = [
+const TABS: { tab: "customers" | "products" | "new-sale" | "overdue" | "reports"; label: string }[] = [
   { tab: "customers", label: "العملاء" },
   { tab: "products", label: "المنتجات" },
   { tab: "new-sale", label: "بيع جديد" },
   { tab: "overdue", label: "المتأخرات" },
+  { tab: "reports", label: "التقارير" },
 ];
 
 function App() {
@@ -70,6 +73,9 @@ function App() {
           )}
           {view.tab === "overdue" && (
             <OverduePage onSelectCustomer={(id) => setView({ tab: "customer-detail", customerId: id })} />
+          )}
+          {view.tab === "reports" && (
+            <ReportsPage onSelectCustomer={(id) => setView({ tab: "customer-detail", customerId: id })} />
           )}
           {view.tab === "customer-detail" && (
             <CustomerDetail
