@@ -355,7 +355,7 @@ mod tests {
 
         repo::payment::register_payment(
             &mut conn,
-            CreatePaymentPayload { customer_id: customer, payment_date: "2026-02-01".into(), amount_paid: 50_000, currency_code: "IQD".into(), manual_exchange_rate_micros: 1_000_000 },
+            CreatePaymentPayload { customer_id: customer, sale_id: None, payment_date: "2026-02-01".into(), amount_paid: 50_000, currency_code: "IQD".into(), manual_exchange_rate_micros: 1_000_000 },
         )
         .unwrap();
 

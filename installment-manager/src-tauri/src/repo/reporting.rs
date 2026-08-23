@@ -159,6 +159,7 @@ mod tests {
             &mut conn,
             CreatePaymentPayload {
                 customer_id,
+                sale_id: None,
                 payment_date: "2026-02-01".into(),
                 amount_paid: 100_000,
                 currency_code: "IQD".into(),
@@ -204,6 +205,7 @@ mod tests {
             &mut conn,
             CreatePaymentPayload {
                 customer_id,
+                sale_id: None,
                 payment_date: "2026-02-01".into(),
                 amount_paid: 300_000,
                 currency_code: "IQD".into(),

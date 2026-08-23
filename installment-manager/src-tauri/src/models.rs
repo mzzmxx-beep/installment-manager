@@ -126,11 +126,14 @@ pub struct CreditSaleDto {
 }
 
 /// Request DTO for registering a Payment. Allocation is automatic
-/// (oldest-due-installment-first, ARCHITECTURE.md §4) — the caller does
-/// not pick which installment(s) the payment applies to.
+/// (oldest-due-installment-first, ARCHITECTURE.md §4) across the customer's
+/// outstanding installments — unless `sale_id` narrows it to one invoice.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreatePaymentPayload {
     pub customer_id: i64,
+    /// Optional: scope allocation to this one CreditSale's outstanding
+    /// installments only. `None` keeps the default cross-sale behavior.
+    pub sale_id: Option<i64>,
     pub payment_date: String,
     pub amount_paid: i64,
     pub currency_code: String,

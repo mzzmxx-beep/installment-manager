@@ -40,6 +40,7 @@ export function CustomerDetail({
   const [amount, setAmount] = useState("");
   const [currency, setCurrency] = useState<CurrencyCode>("IQD");
   const [exchangeRate, setExchangeRate] = useState("1");
+  const [selectedSaleId, setSelectedSaleId] = useState("");
 
   async function load() {
     try {
@@ -60,15 +61,27 @@ export function CustomerDetail({
   }, [customerId]);
 
   const totals = useMemo(() => {
-    const byCurrency = new Map<CurrencyCode, { total: number; remaining: number }>();
+    const byCurrency = new Map<CurrencyCode, { total: number; remaining: number; monthlyTotal: number }>();
     for (const sale of sales) {
-      const entry = byCurrency.get(sale.currency_code) ?? { total: 0, remaining: 0 };
+      const entry = byCurrency.get(sale.currency_code) ?? { total: 0, remaining: 0, monthlyTotal: 0 };
       entry.total += sale.total_installment_price;
-      entry.remaining += sale.installments.reduce((sum, i) => sum + i.remaining_amount, 0);
+      const saleRemaining = sale.installments.reduce((sum, i) => sum + i.remaining_amount, 0);
+      entry.remaining += saleRemaining;
+      // Only sales still owed anything contribute to the monthly total —
+      // a fully paid-off sale no longer costs the customer per month.
+      if (saleRemaining > 0 && sale.installments.length > 0) {
+        entry.monthlyTotal += sale.installments[0].scheduled_amount;
+      }
       byCurrency.set(sale.currency_code, entry);
     }
     return byCurrency;
   }, [sales]);
+
+  // Sales still owed anything — the only ones payable against individually.
+  const openSales = useMemo(
+    () => sales.filter((sale) => sale.installments.some((i) => i.remaining_amount > 0)),
+    [sales],
+  );
 
   async function handlePayment(e: React.FormEvent) {
     e.preventDefault();
@@ -77,12 +90,14 @@ export function CustomerDetail({
     try {
       const result = await registerPayment({
         customer_id: customerId,
+        sale_id: selectedSaleId ? Number(selectedSaleId) : null,
         payment_date: paymentDate,
         amount_paid: toStorageAmount(amount, currency),
         currency_code: currency,
         manual_exchange_rate_micros: Math.round((Number(exchangeRate) || 0) * 1_000_000),
       });
       setAmount("");
+      setSelectedSaleId("");
       if (result.unallocated_amount > 0) {
         setError(
           `تم توزيع الدفعة، وتبقى مبلغ ${formatMoney(result.unallocated_amount, currency)} لم يُخصَّص (لا توجد أقساط مستحقة متبقية، أو المبلغ يتجاوز إجمالي المستحق).`,
@@ -123,9 +138,17 @@ export function CustomerDetail({
             </div>
           )}
           {[...totals.entries()].map(([cur, t]) => (
-            <div key={cur}>
-              <span className="text-muted-foreground">المتبقي ({cur}): </span>
-              <span className="font-medium">{formatMoney(t.remaining, cur)}</span>
+            <div key={cur} className="flex gap-4">
+              <span>
+                <span className="text-muted-foreground">المتبقي ({cur}): </span>
+                <span className="font-medium">{formatMoney(t.remaining, cur)}</span>
+              </span>
+              {t.monthlyTotal > 0 && (
+                <span>
+                  <span className="text-muted-foreground">إجمالي القسط الشهري ({cur}): </span>
+                  <span className="font-medium">{formatMoney(t.monthlyTotal, cur)}</span>
+                </span>
+              )}
             </div>
           ))}
         </CardContent>
@@ -138,7 +161,7 @@ export function CustomerDetail({
               <CardHeader>
                 <CardTitle className="flex items-center justify-between text-sm font-medium">
                   <span>
-                    بيع بتاريخ {sale.sale_date} — {formatMoney(sale.total_installment_price, sale.currency_code)}
+                    فاتورة #{sale.id} — {sale.sale_date} — {formatMoney(sale.total_installment_price, sale.currency_code)}
                   </span>
                   <span className="text-muted-foreground">{sale.agreed_months} قسط</span>
                 </CardTitle>
@@ -188,6 +211,20 @@ export function CustomerDetail({
           <CardContent>
             <form onSubmit={handlePayment} className="flex flex-col gap-3">
               <div className="flex flex-col gap-1.5">
+                <Label htmlFor="pay-sale">الفاتورة</Label>
+                <Select id="pay-sale" value={selectedSaleId} onChange={(e) => setSelectedSaleId(e.target.value)}>
+                  <option value="">كل الفواتير (تلقائي)</option>
+                  {openSales.map((sale) => {
+                    const remaining = sale.installments.reduce((sum, i) => sum + i.remaining_amount, 0);
+                    return (
+                      <option key={sale.id} value={sale.id}>
+                        فاتورة #{sale.id} — {sale.sale_date} — متبقي {formatMoney(remaining, sale.currency_code)}
+                      </option>
+                    );
+                  })}
+                </Select>
+              </div>
+              <div className="flex flex-col gap-1.5">
                 <Label htmlFor="pay-date">تاريخ الدفعة</Label>
                 <Input
                   id="pay-date"
@@ -233,7 +270,9 @@ export function CustomerDetail({
                 تسجيل الدفعة
               </Button>
               <p className="text-xs text-muted-foreground">
-                يتم توزيع الدفعة تلقائياً على أقدم الأقساط غير المسددة من كل العملات، مع تحويل المبلغ حسب سعر الصرف أعلاه عند الحاجة.
+                {selectedSaleId
+                  ? "يتم توزيع الدفعة على أقدم الأقساط غير المسددة لهذه الفاتورة فقط، مع تحويل المبلغ حسب سعر الصرف أعلاه عند الحاجة."
+                  : "يتم توزيع الدفعة تلقائياً على أقدم الأقساط غير المسددة من كل الفواتير وكل العملات، مع تحويل المبلغ حسب سعر الصرف أعلاه عند الحاجة."}
               </p>
             </form>
           </CardContent>

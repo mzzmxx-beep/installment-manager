@@ -126,6 +126,7 @@ export function getSalesForCustomer(customerId: number): Promise<CreditSale[]> {
 
 export function registerPayment(payload: {
   customer_id: number;
+  sale_id: number | null;
   payment_date: string;
   amount_paid: number;
   currency_code: CurrencyCode;

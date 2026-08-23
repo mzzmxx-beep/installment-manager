@@ -75,7 +75,9 @@ export function CustomerStatement({ customerId, onBack }: { customerId: number; 
             {sales.map((sale) => (
               <div key={sale.id} className="rounded-md border border-border p-4 print:break-inside-avoid">
                 <div className="flex items-center justify-between text-sm font-medium">
-                  <span>بيع بتاريخ {sale.sale_date}</span>
+                  <span>
+                    فاتورة #{sale.id} — بيع بتاريخ {sale.sale_date}
+                  </span>
                   <span>{formatMoney(sale.total_installment_price, sale.currency_code)}</span>
                 </div>
                 <div className="mt-1 text-xs text-muted-foreground">

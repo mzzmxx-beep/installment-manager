@@ -5,10 +5,11 @@ use crate::audit;
 use crate::engine::{self, OutstandingInstallment};
 use crate::models::{CreatePaymentPayload, PaymentAllocationDto, PaymentDto};
 
-/// Registers a Payment and allocates it across *all* of the customer's
-/// outstanding installments oldest-due-date-first (ARCHITECTURE.md §4),
-/// regardless of which currency each underlying sale was made in, inside a
-/// single transaction.
+/// Registers a Payment and allocates it oldest-due-date-first
+/// (ARCHITECTURE.md §4) across the customer's outstanding installments —
+/// across *all* of the customer's sales by default, or scoped to a single
+/// CreditSale when `payload.sale_id` is set — regardless of which currency
+/// each underlying sale was made in, inside a single transaction.
 ///
 /// The payment can be made in either currency; installments in the other
 /// currency are converted using this payment's own manual exchange rate
@@ -56,12 +57,12 @@ pub fn register_payment(conn: &mut Connection, payload: CreatePaymentPayload) ->
                     cs.currency_code
              FROM installment i
              JOIN credit_sale cs ON cs.id = i.sale_id
-             WHERE cs.customer_id = ?1 AND i.status != 'Paid'
+             WHERE cs.customer_id = ?1 AND (?2 IS NULL OR cs.id = ?2) AND i.status != 'Paid'
              ORDER BY i.due_date ASC, i.id ASC",
         )
         .map_err(|e| e.to_string())?;
     let outstanding: Vec<Outstanding> = outstanding_stmt
-        .query_map(params![payload.customer_id], |row| {
+        .query_map(params![payload.customer_id, payload.sale_id], |row| {
             Ok(Outstanding {
                 id: row.get(0)?,
                 scheduled: row.get(1)?,
@@ -254,6 +255,7 @@ mod tests {
             &mut conn,
             CreatePaymentPayload {
                 customer_id,
+                sale_id: None,
                 payment_date: "2026-02-01".into(),
                 amount_paid: 150_000,
                 currency_code: "IQD".into(),
@@ -276,6 +278,63 @@ mod tests {
     }
 
     #[test]
+    fn sale_id_scopes_allocation_to_one_invoice_only() {
+        let mut conn = init_test_db();
+        let customer_id = setup_sale(&mut conn); // sale A: 300_000 / 3 months = 100_000/mo, due starting 2026-02-01
+
+        let product = repo::product::create_product(
+            &mut conn,
+            CreateProductPayload {
+                name: "Phone".into(),
+                reference_cash_price: 60_000,
+                currency_code: "IQD".into(),
+            },
+        )
+        .unwrap();
+        let sale_b = repo::sale::create_credit_sale(
+            &mut conn,
+            CreateCreditSalePayload {
+                customer_id,
+                guarantor_id: None,
+                sale_date: "2026-01-01".into(),
+                items: vec![CreditSaleItemInput { product_id: product.id, quantity: 1 }],
+                markup_type: MarkupType::Flat,
+                markup_input: 0,
+                agreed_months: 1, // due 2026-02-01, same due date as sale A's first installment
+                currency_code: "IQD".into(),
+                manual_exchange_rate_micros: 1_000_000,
+            },
+        )
+        .unwrap();
+
+        // Without sale_id, this amount would also reach sale A (same due
+        // date, tie-broken by installment id). Scoping to sale B must keep
+        // it there even though sale A still has older/equal-priority debt.
+        let payment = register_payment(
+            &mut conn,
+            CreatePaymentPayload {
+                customer_id,
+                sale_id: Some(sale_b.id),
+                payment_date: "2026-02-01".into(),
+                amount_paid: 60_000,
+                currency_code: "IQD".into(),
+                manual_exchange_rate_micros: 1_000_000,
+            },
+        )
+        .expect("register_payment should succeed");
+
+        assert_eq!(payment.allocations.len(), 1);
+        assert_eq!(payment.allocations[0].allocated_amount, 60_000);
+        assert_eq!(payment.unallocated_amount, 0);
+
+        let sales = repo::sale::get_sales_for_customer(&conn, customer_id).unwrap();
+        let sale_a_installments = &sales.iter().find(|s| s.id != sale_b.id).unwrap().installments;
+        assert!(sale_a_installments.iter().all(|i| i.status == "Pending"), "sale A must be untouched");
+        let sale_b_installments = &sales.iter().find(|s| s.id == sale_b.id).unwrap().installments;
+        assert_eq!(sale_b_installments[0].status, "Paid");
+    }
+
+    #[test]
     fn overpayment_is_reported_as_unallocated() {
         let mut conn = init_test_db();
         let customer_id = setup_sale(&mut conn);
@@ -284,6 +343,7 @@ mod tests {
             &mut conn,
             CreatePaymentPayload {
                 customer_id,
+                sale_id: None,
                 payment_date: "2026-02-01".into(),
                 amount_paid: 1_000_000,
                 currency_code: "IQD".into(),
@@ -306,6 +366,7 @@ mod tests {
             &mut conn,
             CreatePaymentPayload {
                 customer_id,
+                sale_id: None,
                 payment_date: "2026-02-01".into(),
                 amount_paid: 1_000,
                 currency_code: "IQD".into(),
@@ -389,6 +450,7 @@ mod tests {
             &mut conn,
             CreatePaymentPayload {
                 customer_id: customer.id,
+                sale_id: None,
                 payment_date: "2026-03-01".into(),
                 amount_paid: 1_000, // $10.00
                 currency_code: "USD".into(),
