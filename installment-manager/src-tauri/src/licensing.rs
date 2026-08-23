@@ -5,7 +5,9 @@
 //! The vendor's private signing key never appears in this file or ships
 //! with the app — only the public key does, embedded below. Licenses are
 //! generated offline by the `issue_license` bin using a private key kept
-//! outside the repo entirely (see `src-tauri/src/bin/issue_license.rs`).
+//! outside the repo entirely (see `vendor-tools/src/bin/issue_license.rs`
+//! — a separate Cargo package from src-tauri on purpose, so `tauri build`
+//! never sees it as an extra binary target to potentially bundle by mistake).
 
 use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Nonce};

@@ -1,0 +1,28 @@
+[package]
+name = "vendor-tools"
+version = "1.0.0"
+description = "Vendor-only tools (never shipped to customers): vendor keypair generation and license issuance."
+edition = "2021"
+publish = false
+
+# Kept as an entirely separate package from src-tauri (not a workspace member
+# of it, not even a Cargo workspace at all) on purpose: `tauri build` runs
+# `cargo build --release` inside src-tauri, and having extra [[bin]] targets
+# in that same package previously caused tauri-bundler to bundle the wrong
+# executable (issue_license) under the app's own binary name. Being a
+# separate package guarantees src-tauri's release build only ever produces
+# the app binary.
+[[bin]]
+name = "keygen"
+path = "src/bin/keygen.rs"
+
+[[bin]]
+name = "issue_license"
+path = "src/bin/issue_license.rs"
+
+[dependencies]
+installment-manager = { path = "../src-tauri" }
+base64 = "0.22"
+chrono = { version = "0.4.45", features = ["serde"] }
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+rand = "0.8"
