@@ -7,7 +7,7 @@ import { CustomerStatement } from "@/features/reporting/CustomerStatement";
 import { OverduePage } from "@/features/reporting/OverduePage";
 import { ReportsPage } from "@/features/reporting/ReportsPage";
 import { NewSalePage } from "@/features/sales/NewSalePage";
-import { UpdateChecker } from "@/features/settings/UpdateChecker";
+import { AboutPage } from "@/features/settings/AboutPage";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -80,7 +80,7 @@ function App() {
           {view.tab === "reports" && (
             <ReportsPage onSelectCustomer={(id) => setView({ tab: "customer-detail", customerId: id })} />
           )}
-          {view.tab === "about" && <UpdateChecker />}
+          {view.tab === "about" && <AboutPage />}
           {view.tab === "customer-detail" && (
             <CustomerDetail
               customerId={view.customerId}

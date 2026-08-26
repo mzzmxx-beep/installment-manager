@@ -217,6 +217,11 @@ pub enum LicenseStatus {
     Valid {
         customer_name: String,
         expires_at: Option<String>,
+        /// Date the vendor issued this license (from the signed payload).
+        issued_at: String,
+        /// When this license was activated on *this* machine (may be later
+        /// than `issued_at` if the customer didn't activate immediately).
+        activated_at: String,
     },
     Expired {
         customer_name: String,

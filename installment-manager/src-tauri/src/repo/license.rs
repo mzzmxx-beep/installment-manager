@@ -7,18 +7,20 @@ use crate::models::LicenseStatus;
 struct ActivationRow {
     raw_license: String,
     hwid: String,
+    activated_at: String,
     encrypted_last_execution_ts: Vec<u8>,
 }
 
 fn get_activation(conn: &Connection) -> rusqlite::Result<Option<ActivationRow>> {
     conn.query_row(
-        "SELECT raw_license, hwid, encrypted_last_execution_ts FROM license_activation WHERE id = 1",
+        "SELECT raw_license, hwid, activated_at, encrypted_last_execution_ts FROM license_activation WHERE id = 1",
         [],
         |row| {
             Ok(ActivationRow {
                 raw_license: row.get(0)?,
                 hwid: row.get(1)?,
-                encrypted_last_execution_ts: row.get(2)?,
+                activated_at: row.get(2)?,
+                encrypted_last_execution_ts: row.get(3)?,
             })
         },
     )
@@ -82,6 +84,8 @@ pub fn activate_license(conn: &Connection, raw_license: &str) -> rusqlite::Resul
     Ok(LicenseStatus::Valid {
         customer_name: payload.customer_name,
         expires_at: payload.expires_at,
+        issued_at: payload.issued_at,
+        activated_at: now.to_rfc3339(),
     })
 }
 
@@ -103,6 +107,7 @@ pub fn validate_license(conn: &Connection) -> rusqlite::Result<LicenseStatus> {
         }
     };
 
+    let activated_at = row.activated_at.clone();
     let current_hwid = licensing::compute_hwid();
     if current_hwid != row.hwid {
         return Ok(LicenseStatus::Invalid {
@@ -134,6 +139,8 @@ pub fn validate_license(conn: &Connection) -> rusqlite::Result<LicenseStatus> {
     Ok(LicenseStatus::Valid {
         customer_name: payload.customer_name,
         expires_at: payload.expires_at,
+        issued_at: payload.issued_at,
+        activated_at,
     })
 }
 
@@ -177,16 +184,24 @@ mod tests {
         let raw = "eyJsaWNlbnNlX2lkIjoiTElDLWQxMGU0NDIwMjg4OTdiNjciLCJjdXN0b21lcl9uYW1lIjoiUGVycGV0dWFsIFRlc3QgQ28iLCJpc3N1ZWRfYXQiOiIyMDI2LTA4LTIxIiwiZXhwaXJlc19hdCI6bnVsbH0=.n6VoM77V041b16qOyzcF2rEY5ljGqm58I1R0PEcTYhmJyCHyyThey5GtLU82C0scT2Frh6qk+uqbIDaHn2xZAA==";
 
         let activate_status = activate_license(&conn, raw).unwrap();
-        assert_eq!(
-            activate_status,
-            LicenseStatus::Valid { customer_name: "Perpetual Test Co".into(), expires_at: None }
-        );
+        let LicenseStatus::Valid { customer_name, expires_at, issued_at, activated_at } = activate_status else {
+            panic!("expected Valid, got {activate_status:?}");
+        };
+        assert_eq!(customer_name, "Perpetual Test Co");
+        assert_eq!(expires_at, None);
+        assert_eq!(issued_at, "2026-08-21");
+        assert!(!activated_at.is_empty());
 
         let validate_status = validate_license(&conn).unwrap();
-        assert_eq!(
-            validate_status,
-            LicenseStatus::Valid { customer_name: "Perpetual Test Co".into(), expires_at: None }
-        );
+        let LicenseStatus::Valid { customer_name, expires_at, issued_at, activated_at: activated_at_2 } = validate_status else {
+            panic!("expected Valid, got {validate_status:?}");
+        };
+        assert_eq!(customer_name, "Perpetual Test Co");
+        assert_eq!(expires_at, None);
+        assert_eq!(issued_at, "2026-08-21");
+        // The activation timestamp recorded at `activate_license` time must
+        // be preserved (not silently refreshed) by a later `validate_license`.
+        assert_eq!(activated_at_2, activated_at);
     }
 
     #[test]

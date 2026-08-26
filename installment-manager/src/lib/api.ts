@@ -6,7 +6,7 @@ export type InstallmentStatus = "Pending" | "Partial" | "Paid";
 
 export type LicenseStatus =
   | { state: "NotActivated" }
-  | { state: "Valid"; customer_name: string; expires_at: string | null }
+  | { state: "Valid"; customer_name: string; expires_at: string | null; issued_at: string; activated_at: string }
   | { state: "Expired"; customer_name: string; expires_at: string }
   | { state: "Invalid"; reason: string }
   | { state: "ClockRollbackDetected" };
