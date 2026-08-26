@@ -9,7 +9,7 @@ enforcement. No backend server, no internet dependency for core operation.
 
 ## 2. Tech Stack
 
-- **Frontend:** React 18 + TypeScript, built with Vite, styled with
+- **Frontend:** React 19 + TypeScript, built with Vite, styled with
   Tailwind CSS, components from Shadcn UI.
 - **Desktop Wrapper & Backend:** Tauri 2.x (Rust). All business logic,
   database access, and licensing logic live in Rust.
@@ -86,13 +86,19 @@ transaction — partial writes must never be observable.
 ### Payment Engine (strictly transactional)
 - `register_payment(payload)` — opens a SQLite transaction: inserts the
   `Payment` row (with its own manual exchange rate), then runs an
-  allocation algorithm that walks *all* of the customer's unpaid
-  installments oldest-first — regardless of which currency each
-  underlying sale is in, converting via this payment's own manual
-  exchange rate when they differ — and inserts `PaymentAllocation` rows
-  until the payment amount is fully distributed, then commits. Any
-  leftover (overpayment, or nothing outstanding) is reported back
-  rather than dropped.
+  allocation algorithm that walks the customer's unpaid installments
+  oldest-first — regardless of which currency each underlying sale is
+  in, converting via this payment's own manual exchange rate when they
+  differ — and inserts `PaymentAllocation` rows until the payment
+  amount is fully distributed, then commits. Any leftover (overpayment,
+  or nothing outstanding) is reported back rather than dropped.
+- `payload.sale_id` (optional) narrows allocation to one `CreditSale`'s
+  outstanding installments only, instead of walking the customer's
+  installments across every sale. The payment UI exposes this as an
+  invoice picker defaulting to "all invoices" (the original behavior).
+  No schema change was needed for this — `Payment` still has no
+  `sale_id` column; which sale(s) a payment actually reached is always
+  derivable after the fact via `PaymentAllocation → Installment.sale_id`.
 
 ### Reporting & Dashboards
 - `get_customer_statement(customer_id)` — a customer's full sales +
@@ -191,14 +197,17 @@ calls anywhere in the licensing path.
   re-parses and re-verifies from that raw string rather than trusting
   any separately-stored field, so tampering with an individual DB
   column can't forge a license.
-  - `src-tauri/src/bin/issue_license.rs` is the vendor-facing tool that
-    signs a new license from the private key: scriptable
+  - `vendor-tools/src/bin/issue_license.rs` is the vendor-facing tool
+    that signs a new license from the private key: scriptable
     (`issue_license <key-path> "<name>" [--days N]`) or interactive
     (no args — finds the key file next to itself, prompts for the
     rest). Its own prompts are English-only on purpose: it's
     developer-only, never shown to a customer, and the legacy Windows
     console can't shape Arabic text correctly even with a UTF-8
-    codepage.
+    codepage. `keygen`/`issue_license` live in their own `vendor-tools`
+    Cargo package (sibling to `src-tauri`, depending on it as a plain
+    library dependency) rather than as extra `[[bin]]` targets inside
+    `src-tauri` itself — see §10 for why.
 - **HWID Binding:** at activation, Rust computes a stable hash (SHA-256)
   derived from the machine's CPU `ProcessorId`, motherboard serial
   number, and the Windows machine GUID — fetched in a single
@@ -244,6 +253,11 @@ but the fields, semantics, and rules below are binding):
   snapshot on `CreditSaleItem`.
 
 ### CreditSale & CreditSaleItem (The Immutable Snapshot)
+- `CreditSale.id` doubles as the user-facing invoice number (shown in
+  the UI as "فاتورة #{id}") — no separate `invoice_number` column.
+  SQLite's `AUTOINCREMENT` already guarantees it's unique and
+  sequential, so a redundant second identifier would only risk drifting
+  out of sync with the real one.
 - `CreditSale`: `id`, `customer_id`, `guarantor_id` (nullable FK to
   **`Customer`**, not a separate table — must differ from
   `customer_id`), `sale_date`, `agreed_months` (INTEGER),
@@ -323,18 +337,56 @@ requires no frontend rewrite and no business-logic rewrite:
   `tauri.conf.json` — a plain installable `.exe`; MSI/WiX isn't used).
   Produces `installment-manager_<version>_x64-setup.exe` under
   `src-tauri/target/release/bundle/nsis/`.
-- **`"mainBinaryName": "installment-manager"` must stay set** in
-  `tauri.conf.json`. `src-tauri` has three `[[bin]]` targets (the app,
-  plus the dev-only `keygen`/`issue_license` tools under
-  `src-tauri/src/bin/`); without this field, `tauri build`'s default
-  binary-picking heuristic has bundled the *wrong* executable
-  (`issue_license.exe`) into the installer. Confirm any future release
-  build logs `Built application at: ...\installment-manager.exe`
-  before trusting the output.
+- **`vendor-tools` (`keygen`, `issue_license`) is a separate Cargo
+  package, not extra `[[bin]]` targets inside `src-tauri`.** This is
+  the real fix for a bug hit in practice: with three `[[bin]]` targets
+  in one package (`installment-manager`, `keygen`, `issue_license`),
+  `tauri build`'s NSIS bundling step packaged `issue_license.exe`
+  *renamed as* `installment-manager.exe` — even with `mainBinaryName`
+  correctly set and the build log correctly reporting
+  `Built application at: ...\installment-manager.exe`. Stale leftover
+  binaries from an earlier build layout in `target/release/`
+  (`deps/issue_license.exe` etc.) were implicated; `mainBinaryName`
+  alone did not reliably prevent it from recurring. Isolating the
+  vendor tools into their own package means `src-tauri`'s release build
+  only ever has one binary target, so there is nothing left to
+  bundle by mistake. `"mainBinaryName": "installment-manager"` is kept
+  set regardless, as cheap defense-in-depth.
+  - **After any future release build, verify the installed binary is
+    really the GUI app before trusting it** — hashing the exe is
+    *not* reliable for this (Rust release builds aren't
+    byte-reproducible between separate `cargo build` invocations, so
+    two legitimately-identical builds can still have different
+    hashes). Instead, launch the installed exe and confirm it opens a
+    real window with no console/stdout output (e.g. via
+    `Start-Process -RedirectStandardOutput` and checking both
+    `MainWindowTitle` and that stdout is empty) — `issue_license`'s
+    interactive prompts are unmistakable if it's ever bundled by
+    mistake again.
+  - To rebuild the vendor tools: `cd vendor-tools && cargo build
+    --release --bin keygen` / `--bin issue_license` (previously run
+    from `src-tauri`).
+- **`bundle.windows.webviewInstallMode` is set to `offlineInstaller`**
+  in `tauri.conf.json` (not Tauri's default `downloadBootstrapper`).
+  This embeds the full WebView2 Runtime installer (~150MB, hence the
+  larger `.exe`) so installation never depends on internet access on
+  the customer's machine — consistent with the app's offline-first
+  design (§1). The trade-off (installer size) was a deliberate choice
+  over the smaller `downloadBootstrapper`/`embedBootstrapper` modes,
+  which need internet at install time if WebView2 isn't already
+  present.
 - A fresh install carries no data: the SQLite database is created empty
-  in the OS-specific app-local-data directory on first run, entirely
-  separate from the installer package — nothing to strip or reset
-  between builds.
+  in the OS-specific app-local-data directory
+  (`%LOCALAPPDATA%\com.installmentmanager.app\installment_manager.sqlite3`,
+  keyed off `tauri.conf.json`'s `identifier` — distinct from the
+  install directory, `%LOCALAPPDATA%\installment-manager\`, which
+  holds only the executable) on first run. Because these two
+  directories are separate and the NSIS installer never touches the
+  former, **updating to a newer version is just running the new
+  installer over the old one — no uninstall needed, and existing data
+  (including the activated license, stored in that same database) is
+  untouched.** Any new migration still applies automatically and
+  additively on first launch of the new version.
 - On Windows, this bundled SQLite build defaults `PRAGMA foreign_keys`
   to ON (not SQLite's usual off-by-default) — relevant to any future
   migration that rebuilds a table (create/copy/drop/rename, needed

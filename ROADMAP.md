@@ -1,14 +1,16 @@
 # Roadmap
 
-## Status (2026-08-21)
+## Status (2026-08-23)
 
-**All 6 original phases are complete**, plus an unplanned Phase 7. The
-app has a working end-to-end flow (customers, products, credit sales,
-payments, licensing, reporting), a distributable Windows installer has
-been built, and it has been used with real (non-test) data. See
-ARCHITECTURE.md for the as-built design — several details below evolved
-during implementation; ARCHITECTURE.md reflects the final version, this
-file is left as a historical log of what was planned per phase.
+**All 6 original phases are complete**, plus unplanned Phases 7 and 8.
+The app has a working end-to-end flow (customers, products, credit
+sales, payments, licensing, reporting), a distributable offline-capable
+Windows installer (v1.0.0) has been built and used to update a real,
+already-in-use install without touching its data, and the app has been
+used with real (non-test) data. See ARCHITECTURE.md for the as-built
+design — several details below evolved during implementation;
+ARCHITECTURE.md reflects the final version, this file is left as a
+historical log of what was planned per phase.
 
 Known deviations from the original plan, folded into ARCHITECTURE.md:
 - **Guarantor is no longer a separate entity.** `CreditSale.guarantor_id`
@@ -131,3 +133,40 @@ Added after the original 6 phases, per direct request:
   is created empty on first run, entirely separate from the installer)
   produces a fully working, licensed, reportable installment-tracking
   app.
+
+## Phase 8: Invoicing, Payment-Reliability, and Distribution Hardening (not in the original plan) — ✅ Complete
+Added 2026-08-23, per direct request:
+- **Invoice numbers**: every `CreditSale` is now shown to the user as
+  "فاتورة #{id}" (its existing `id`, not a new column — see
+  ARCHITECTURE.md §8) on the customer detail screen and the printable
+  customer statement.
+- **Invoice-scoped payments**: `register_payment` accepts an optional
+  `sale_id` to allocate a payment to one invoice's outstanding
+  installments only, instead of always spreading it across every sale
+  the customer has. The payment form gained an invoice picker
+  defaulting to "all invoices" (the original, still-available
+  behavior). No migration needed.
+- **Combined monthly installment total**: the customer detail screen
+  now shows, per currency, the sum of the monthly installment amount
+  across all of that customer's still-open sales, next to the existing
+  remaining-balance figure — computed client-side from data already
+  fetched, no new backend command.
+- **Fixed a real NSIS packaging bug**: `tauri build` had been bundling
+  the `issue_license` vendor tool renamed as `installment-manager.exe`
+  into the installer, discovered when a real install prompted for the
+  vendor's private key on launch instead of opening the app. Root-caused
+  and fixed by moving `keygen`/`issue_license` out of `src-tauri` into
+  their own `vendor-tools` Cargo package — see ARCHITECTURE.md §10 for
+  the full story and why `mainBinaryName` alone wasn't a reliable fix.
+- **Switched to an offline-capable installer**: `webviewInstallMode` is
+  now `offlineInstaller` (embeds the full WebView2 Runtime, ~150MB)
+  instead of Tauri's default `downloadBootstrapper`, so installation no
+  longer needs internet access on the customer's machine.
+- Version bumped to **1.0.0**, built, and used to update a real existing
+  install on the vendor's own machine — confirmed via matching database
+  file hashes before/after that the update did not touch existing data.
+- **Exit criteria:** a rebuilt installer opens the real app (not the
+  license tool) on a clean install; a payment can be scoped to one
+  invoice; a customer's combined monthly installment total displays
+  correctly; updating an existing install preserves its database and
+  activated license. All met.
