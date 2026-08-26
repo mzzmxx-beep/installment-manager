@@ -19,3 +19,11 @@ pub fn activate_license(state: State<DbState>, payload: ActivateLicensePayload) 
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     repo::license::activate_license(&conn, &payload.license_key).map_err(|e| e.to_string())
 }
+
+/// Tauri Command: starts the one-time free trial on this machine (no
+/// license key needed). Refused if this install already has an activation.
+#[tauri::command]
+pub fn start_trial(state: State<DbState>) -> Result<LicenseStatus, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    repo::license::start_trial(&conn).map_err(|e| e.to_string())
+}

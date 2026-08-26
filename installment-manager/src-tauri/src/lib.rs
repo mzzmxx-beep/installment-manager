@@ -31,6 +31,7 @@ pub fn run() {
             commands::customer_document::delete_customer_document,
             commands::license::validate_license,
             commands::license::activate_license,
+            commands::license::start_trial,
             commands::product::create_product,
             commands::product::get_active_products,
             commands::sale::create_credit_sale,

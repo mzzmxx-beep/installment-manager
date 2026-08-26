@@ -1,13 +1,9 @@
 import { useEffect, useState } from "react";
 import { validateLicense, type LicenseStatus } from "@/lib/api";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { COMPANY } from "@/lib/company";
 import { UpdateChecker } from "@/features/settings/UpdateChecker";
-
-const COMPANY = {
-  name: "ماس للبرامج بالذكاء الاصطناعي",
-  phone: "07730466624",
-  email: "mahmood.saad1@outlook.com",
-};
 
 function formatDate(iso: string): string {
   const d = new Date(iso);
@@ -63,8 +59,9 @@ export function AboutPage() {
 
       {license?.state === "Valid" && (
         <Card>
-          <CardHeader>
+          <CardHeader className="flex-row items-center justify-between">
             <CardTitle>معلومات الترخيص</CardTitle>
+            {license.is_trial && <Badge variant="warning">نسخة تجريبية</Badge>}
           </CardHeader>
           <CardContent className="flex flex-col gap-2 text-sm">
             <div>

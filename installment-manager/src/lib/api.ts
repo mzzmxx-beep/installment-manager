@@ -6,8 +6,15 @@ export type InstallmentStatus = "Pending" | "Partial" | "Paid";
 
 export type LicenseStatus =
   | { state: "NotActivated" }
-  | { state: "Valid"; customer_name: string; expires_at: string | null; issued_at: string; activated_at: string }
-  | { state: "Expired"; customer_name: string; expires_at: string }
+  | {
+      state: "Valid";
+      customer_name: string;
+      expires_at: string | null;
+      issued_at: string;
+      activated_at: string;
+      is_trial: boolean;
+    }
+  | { state: "Expired"; customer_name: string; expires_at: string; is_trial: boolean }
   | { state: "Invalid"; reason: string }
   | { state: "ClockRollbackDetected" };
 
@@ -184,6 +191,10 @@ export function validateLicense(): Promise<LicenseStatus> {
 
 export function activateLicense(licenseKey: string): Promise<LicenseStatus> {
   return invoke("activate_license", { payload: { license_key: licenseKey } });
+}
+
+export function startTrial(): Promise<LicenseStatus> {
+  return invoke("start_trial");
 }
 
 export interface CurrencyBalance {

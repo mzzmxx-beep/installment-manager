@@ -217,15 +217,20 @@ pub enum LicenseStatus {
     Valid {
         customer_name: String,
         expires_at: Option<String>,
-        /// Date the vendor issued this license (from the signed payload).
+        /// Date the vendor issued this license (from the signed payload) —
+        /// for a free trial (no vendor payload involved) this is the same
+        /// as `activated_at`'s date.
         issued_at: String,
         /// When this license was activated on *this* machine (may be later
         /// than `issued_at` if the customer didn't activate immediately).
         activated_at: String,
+        /// True for a self-service free trial (see `is_trial` below).
+        is_trial: bool,
     },
     Expired {
         customer_name: String,
         expires_at: String,
+        is_trial: bool,
     },
     /// Covers a malformed/unsigned key, a signature that doesn't match the
     /// embedded public key, or a HWID that doesn't match the one this

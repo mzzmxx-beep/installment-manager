@@ -1,21 +1,25 @@
 import { useEffect, useState } from "react";
-import { activateLicense, validateLicense, type LicenseStatus } from "@/lib/api";
+import { activateLicense, startTrial, validateLicense, type LicenseStatus } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
+import { COMPANY } from "@/lib/company";
 
 function ActivationForm({
   title,
   description,
   onActivated,
+  allowTrial,
 }: {
   title: string;
-  description?: string;
+  description?: React.ReactNode;
   onActivated: (status: LicenseStatus) => void;
+  allowTrial?: boolean;
 }) {
   const [licenseKey, setLicenseKey] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [trialSubmitting, setTrialSubmitting] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -39,14 +43,33 @@ function ActivationForm({
     }
   }
 
+  async function handleTrial() {
+    setError(null);
+    setTrialSubmitting(true);
+    try {
+      const status = await startTrial();
+      if (status.state === "Valid") {
+        onActivated(status);
+      } else if (status.state === "Invalid") {
+        setError(status.reason);
+      } else {
+        setError("تعذر بدء التجربة المجانية");
+      }
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setTrialSubmitting(false);
+    }
+  }
+
   return (
     <div dir="rtl" className="flex min-h-screen items-center justify-center bg-background px-6">
       <Card className="w-full max-w-md">
         <CardHeader>
           <CardTitle>{title}</CardTitle>
-          {description && <p className="text-sm text-muted-foreground">{description}</p>}
+          {description && <div className="text-sm text-muted-foreground">{description}</div>}
         </CardHeader>
-        <CardContent>
+        <CardContent className="flex flex-col gap-3">
           <form onSubmit={handleSubmit} className="flex flex-col gap-3">
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="license-key">رمز الترخيص</Label>
@@ -61,13 +84,44 @@ function ActivationForm({
               />
             </div>
             {error && <p className="text-sm text-destructive">{error}</p>}
-            <Button type="submit" disabled={submitting || !licenseKey.trim()}>
+            <Button type="submit" disabled={submitting || trialSubmitting || !licenseKey.trim()}>
               تفعيل
             </Button>
           </form>
+
+          {allowTrial && (
+            <>
+              <div className="flex items-center gap-3">
+                <div className="h-px flex-1 bg-border" />
+                <span className="text-xs text-muted-foreground">أو</span>
+                <div className="h-px flex-1 bg-border" />
+              </div>
+              <Button type="button" variant="outline" disabled={submitting || trialSubmitting} onClick={handleTrial}>
+                {trialSubmitting ? "جارٍ بدء التجربة..." : "ابدأ التجربة المجانية (٣٠ يوماً)"}
+              </Button>
+            </>
+          )}
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+function TrialExpiredContact() {
+  return (
+    <>
+      <p>انتهت الفترة التجريبية المجانية (٣٠ يوماً). للحصول على ترخيص كامل، تواصل معنا:</p>
+      <div className="mt-2 flex flex-col gap-0.5 text-foreground">
+        <span className="font-medium">{COMPANY.name}</span>
+        <a className="hover:underline" href={`tel:${COMPANY.phone}`}>
+          {COMPANY.phone}
+        </a>
+        <a className="hover:underline" href={`mailto:${COMPANY.email}`}>
+          {COMPANY.email}
+        </a>
+      </div>
+      <p className="mt-2">بعد الحصول على رمز الترخيص، الصقه أدناه للتفعيل.</p>
+    </>
   );
 }
 
@@ -126,15 +180,22 @@ export function LicenseGate({ children }: { children: React.ReactNode }) {
       return (
         <ActivationForm
           title="تفعيل إدارة الأقساط"
-          description="أدخل رمز الترخيص الذي حصلت عليه لتفعيل التطبيق."
+          description="أدخل رمز الترخيص الذي حصلت عليه لتفعيل التطبيق، أو جرّب البرنامج مجاناً بلا رمز."
           onActivated={setStatus}
+          allowTrial
         />
       );
     case "Expired":
       return (
         <ActivationForm
-          title="انتهى الترخيص"
-          description={`ترخيص "${status.customer_name}" انتهى بتاريخ ${status.expires_at}. أدخل رمز ترخيص جديد للمتابعة.`}
+          title={status.is_trial ? "انتهت الفترة التجريبية" : "انتهى الترخيص"}
+          description={
+            status.is_trial ? (
+              <TrialExpiredContact />
+            ) : (
+              `ترخيص "${status.customer_name}" انتهى بتاريخ ${status.expires_at}. أدخل رمز ترخيص جديد للمتابعة.`
+            )
+          }
           onActivated={setStatus}
         />
       );
