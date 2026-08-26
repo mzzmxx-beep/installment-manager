@@ -1,5 +1,8 @@
 pub mod analytics;
+pub mod backup;
+pub mod currency_report;
 pub mod customer;
+pub mod customer_document;
 pub mod license;
 pub mod payment;
 pub mod product;

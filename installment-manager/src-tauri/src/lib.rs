@@ -14,6 +14,7 @@ use tauri::Manager;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let conn = db::init_db(app)?;
             app.manage(DbState(Mutex::new(conn)));
@@ -22,6 +23,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::customer::create_customer,
             commands::customer::get_customers,
+            commands::customer_document::add_customer_document,
+            commands::customer_document::get_customer_documents,
+            commands::customer_document::delete_customer_document,
             commands::license::validate_license,
             commands::license::activate_license,
             commands::product::create_product,
@@ -36,6 +40,12 @@ pub fn run() {
             commands::analytics::get_top_customers,
             commands::analytics::get_most_overdue_customers,
             commands::analytics::get_customers_overview,
+            commands::currency_report::get_sale_conversions,
+            commands::currency_report::get_payment_conversions,
+            commands::currency_report::get_product_conversion_summary,
+            commands::currency_report::get_customer_conversion_summary,
+            commands::backup::backup_database,
+            commands::backup::get_onedrive_dir,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

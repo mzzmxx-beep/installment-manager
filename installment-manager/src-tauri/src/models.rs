@@ -114,6 +114,10 @@ pub struct CreditSaleDto {
     pub id: i64,
     pub customer_id: i64,
     pub guarantor_id: Option<i64>,
+    /// Denormalized from `Customer.name` at read time for display — the
+    /// guarantor is just another `Customer` row (ARCHITECTURE.md §8), so
+    /// this is never stored, only joined in.
+    pub guarantor_name: Option<String>,
     pub sale_date: String,
     pub agreed_months: i32,
     pub applied_markup_value: i64,
@@ -162,6 +166,40 @@ pub struct PaymentDto {
     pub created_at: String,
     pub allocations: Vec<PaymentAllocationDto>,
     pub unallocated_amount: i64,
+}
+
+/// Typed response DTO for a CustomerDocument row (a "مستمسك" photo — ID
+/// card, contract page, etc.), content included as base64 for the IPC
+/// boundary (ARCHITECTURE.md §3 — no raw bytes/paths cross it).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CustomerDocumentDto {
+    pub id: i64,
+    pub customer_id: i64,
+    pub file_name: String,
+    pub mime_type: String,
+    pub created_at: String,
+    pub content_base64: String,
+}
+
+/// Metadata-only shape of a CustomerDocument (no content) — used as the
+/// response for add/delete and for the audit log, so a document's image
+/// bytes are never duplicated into `audit_log`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CustomerDocumentMetaDto {
+    pub id: i64,
+    pub customer_id: i64,
+    pub file_name: String,
+    pub mime_type: String,
+    pub created_at: String,
+}
+
+/// Request DTO for uploading a new CustomerDocument.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AddCustomerDocumentPayload {
+    pub customer_id: i64,
+    pub file_name: String,
+    pub mime_type: String,
+    pub content_base64: String,
 }
 
 /// Request DTO for activating a license (ARCHITECTURE.md §7).
@@ -296,4 +334,79 @@ pub struct CustomerOverviewDto {
     pub total_purchased_by_currency: Vec<CurrencyAmountDto>,
     pub total_remaining_by_currency: Vec<CurrencyAmountDto>,
     pub last_sale_date: Option<String>,
+}
+
+/// One sale item whose product currency differs from its sale's currency —
+/// i.e. it was actually run through `engine::convert_currency` at sale time.
+/// `original_unit_price` is *not* a stored value (`credit_sale_item` has no
+/// such column) — it's reconstructed by inverse-converting the stored
+/// `snapshot_cash_price` back through the same rate, which is exact as long
+/// as the product's currency hasn't changed since the sale (there is no
+/// edit-product command, so this holds for every sale today).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SaleConversionItemDto {
+    pub product_id: i64,
+    pub product_name: String,
+    pub original_currency: String,
+    pub original_unit_price: i64,
+    pub converted_currency: String,
+    pub converted_unit_price: i64,
+    pub quantity: i64,
+    pub exchange_rate_micros: i64,
+}
+
+/// One invoice's currency-conversion detail: only the items that actually
+/// crossed a currency boundary are included (a same-currency item never
+/// went through `convert_currency`, so it has nothing to explain).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SaleConversionDto {
+    pub sale_id: i64,
+    pub sale_date: String,
+    pub customer_id: i64,
+    pub customer_name: String,
+    pub sale_currency: String,
+    pub items: Vec<SaleConversionItemDto>,
+}
+
+/// One payment whose currency differed from at least one installment it
+/// paid into, so part (or all) of it was converted by
+/// `engine::allocate_payment`. `converted_by_currency` is how much landed
+/// in each *other* currency — a payment can span both currencies if it was
+/// large enough to spill from one sale's installments into another's.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PaymentConversionDto {
+    pub payment_id: i64,
+    pub payment_date: String,
+    pub customer_id: i64,
+    pub customer_name: String,
+    pub payment_currency: String,
+    pub amount_paid: i64,
+    pub exchange_rate_micros: i64,
+    pub converted_by_currency: Vec<CurrencyAmountDto>,
+}
+
+/// Per-product rollup of every sale-item conversion involving that product
+/// (device) — how many times it was sold in a currency other than its own,
+/// and the total value on each side of the conversion.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProductConversionSummaryDto {
+    pub product_id: i64,
+    pub product_name: String,
+    pub conversion_count: i64,
+    pub original_value_by_currency: Vec<CurrencyAmountDto>,
+    pub converted_value_by_currency: Vec<CurrencyAmountDto>,
+}
+
+/// Per-customer rollup of both conversion sources (sale items and
+/// payments), so "how much currency conversion touched this customer" has
+/// one answer instead of two separate reports to cross-reference.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CustomerConversionSummaryDto {
+    pub customer_id: i64,
+    pub customer_name: String,
+    pub item_conversion_count: i64,
+    pub item_original_value_by_currency: Vec<CurrencyAmountDto>,
+    pub item_converted_value_by_currency: Vec<CurrencyAmountDto>,
+    pub payment_conversion_count: i64,
+    pub payment_converted_value_by_currency: Vec<CurrencyAmountDto>,
 }

@@ -27,3 +27,11 @@ pub fn log_update(
         params![table_name, record_id, old_json, new_json],
     );
 }
+
+pub fn log_delete(conn: &Connection, table_name: &str, record_id: i64, old_payload: &impl Serialize) {
+    let old_json = serde_json::to_string(old_payload).unwrap_or_default();
+    let _ = conn.execute(
+        "INSERT INTO audit_log (table_name, record_id, action, old_payload) VALUES (?1, ?2, 'DELETE', ?3)",
+        params![table_name, record_id, old_json],
+    );
+}

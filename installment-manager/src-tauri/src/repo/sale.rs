@@ -126,10 +126,19 @@ pub fn create_credit_sale(
         .query_row("SELECT created_at FROM credit_sale WHERE id = ?1", params![sale_id], |r| r.get(0))
         .map_err(|e| e.to_string())?;
 
+    let guarantor_name: Option<String> = match payload.guarantor_id {
+        Some(guarantor_id) => Some(
+            tx.query_row("SELECT name FROM customer WHERE id = ?1", params![guarantor_id], |r| r.get(0))
+                .map_err(|e| format!("guarantor {guarantor_id} not found: {e}"))?,
+        ),
+        None => None,
+    };
+
     let dto = CreditSaleDto {
         id: sale_id,
         customer_id: payload.customer_id,
         guarantor_id: payload.guarantor_id,
+        guarantor_name,
         sale_date: payload.sale_date,
         agreed_months: payload.agreed_months,
         applied_markup_value,
@@ -151,11 +160,13 @@ pub fn create_credit_sale(
 /// `PaymentAllocation` (ARCHITECTURE.md §8 — no stored balance column).
 pub fn get_sales_for_customer(conn: &Connection, customer_id: i64) -> rusqlite::Result<Vec<CreditSaleDto>> {
     let mut sale_stmt = conn.prepare(
-        "SELECT id, customer_id, guarantor_id, sale_date, agreed_months, applied_markup_value,
-                total_installment_price, currency_code, manual_exchange_rate_micros, created_at
-         FROM credit_sale
-         WHERE customer_id = ?1
-         ORDER BY sale_date DESC, id DESC",
+        "SELECT cs.id, cs.customer_id, cs.guarantor_id, cs.sale_date, cs.agreed_months, cs.applied_markup_value,
+                cs.total_installment_price, cs.currency_code, cs.manual_exchange_rate_micros, cs.created_at,
+                g.name AS guarantor_name
+         FROM credit_sale cs
+         LEFT JOIN customer g ON g.id = cs.guarantor_id
+         WHERE cs.customer_id = ?1
+         ORDER BY cs.sale_date DESC, cs.id DESC",
     )?;
 
     let sales = sale_stmt
@@ -171,6 +182,7 @@ pub fn get_sales_for_customer(conn: &Connection, customer_id: i64) -> rusqlite::
                 currency_code: row.get(7)?,
                 manual_exchange_rate_micros: row.get(8)?,
                 created_at: row.get(9)?,
+                guarantor_name: row.get(10)?,
                 items: Vec::new(),
                 installments: Vec::new(),
             })
@@ -372,6 +384,10 @@ mod tests {
         .expect("create_credit_sale with a guarantor should succeed");
 
         assert_eq!(sale.guarantor_id, Some(guarantor.id));
+        assert_eq!(sale.guarantor_name.as_deref(), Some("Guarantor Customer"));
+
+        let fetched = get_sales_for_customer(&conn, customer_id).unwrap();
+        assert_eq!(fetched[0].guarantor_name.as_deref(), Some("Guarantor Customer"));
     }
 
     #[test]

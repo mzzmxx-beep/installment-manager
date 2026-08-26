@@ -1,4 +1,4 @@
-import type { CurrencyCode } from "@/lib/api";
+import type { CurrencyAmount, CurrencyCode } from "@/lib/api";
 
 /** Formats an integer storage amount (USD cents / exact IQD) into a display string. */
 export function formatMoney(amount: number, currency: CurrencyCode): string {
@@ -6,6 +6,17 @@ export function formatMoney(amount: number, currency: CurrencyCode): string {
     return (amount / 100).toLocaleString("en-US", { style: "currency", currency: "USD" });
   }
   return `${amount.toLocaleString("en-US")} د.ع`;
+}
+
+/** Formats a list of per-currency amounts, e.g. from analytics/report DTOs. */
+export function formatAmounts(amounts: CurrencyAmount[]): string {
+  if (amounts.length === 0) return "—";
+  return amounts.map((a) => formatMoney(a.amount, a.currency_code)).join("، ");
+}
+
+/** Formats a `*_exchange_rate_micros` column (IQD per 1 USD, ×1,000,000) as a plain decimal rate. */
+export function formatRate(rateMicros: number): string {
+  return (rateMicros / 1_000_000).toLocaleString("en-US", { maximumFractionDigits: 6 });
 }
 
 /** Converts a user-typed decimal string in display units into the integer storage unit. */

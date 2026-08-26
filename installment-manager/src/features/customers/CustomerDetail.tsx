@@ -15,6 +15,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
+import { CustomerDocuments } from "@/features/customers/CustomerDocuments";
 
 function statusBadge(status: InstallmentStatus) {
   if (status === "Paid") return <Badge variant="success">مسدد</Badge>;
@@ -154,6 +155,8 @@ export function CustomerDetail({
         </CardContent>
       </Card>
 
+      <CustomerDocuments customerId={customerId} />
+
       <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
         <div className="flex flex-col gap-4">
           {sales.map((sale) => (
@@ -170,6 +173,12 @@ export function CustomerDetail({
                 <div className="text-sm text-muted-foreground">
                   {sale.items.map((item) => `${item.product_name} ×${item.quantity}`).join("، ")}
                 </div>
+                {sale.guarantor_name && (
+                  <div className="text-sm">
+                    <span className="text-muted-foreground">الكفيل: </span>
+                    {sale.guarantor_name}
+                  </div>
+                )}
                 <div className="overflow-x-auto rounded-md border border-border">
                   <table className="w-full text-sm">
                     <thead className="bg-muted/50 text-muted-foreground">

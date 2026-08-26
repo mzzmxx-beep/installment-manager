@@ -5,18 +5,20 @@ import {
   getSalesSummary,
   getTopCustomers,
   getTopProducts,
-  type CurrencyAmount,
   type CustomerOverdueRanking,
   type CustomerOverview,
   type CustomerRanking,
   type ProductSales,
   type SalesSummary,
 } from "@/lib/api";
-import { formatMoney, todayIso } from "@/lib/format";
+import { formatAmounts, formatMoney, todayIso } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ExportCsvButton } from "@/components/ui/export-csv-button";
 import { cn } from "@/lib/utils";
+import { BackupButton } from "@/features/reporting/BackupButton";
+import { CurrencyConversionReport } from "@/features/reporting/CurrencyConversionReport";
 
 type Period = "all" | "month" | "year";
 
@@ -31,11 +33,6 @@ function periodRange(period: Period): { from: string | null; to: string | null }
     return { from, to: todayIso() };
   }
   return { from: null, to: null };
-}
-
-function formatAmounts(amounts: CurrencyAmount[]): string {
-  if (amounts.length === 0) return "—";
-  return amounts.map((a) => formatMoney(a.amount, a.currency_code)).join("، ");
 }
 
 export function ReportsPage({ onSelectCustomer }: { onSelectCustomer: (id: number) => void }) {
@@ -73,6 +70,8 @@ export function ReportsPage({ onSelectCustomer }: { onSelectCustomer: (id: numbe
     <div className="flex flex-col gap-6">
       {error && <p className="text-sm text-destructive">{error}</p>}
 
+      <BackupButton />
+
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
@@ -93,6 +92,19 @@ export function ReportsPage({ onSelectCustomer }: { onSelectCustomer: (id: numbe
                   {p.label}
                 </Button>
               ))}
+              <ExportCsvButton
+                filename="ملخص-المبيعات-والأرباح.csv"
+                headers={["العملة", "عدد المبيعات", "السعر النقدي الإجمالي", "الربح", "إجمالي التقسيط", "المحصَّل", "المتبقي"]}
+                rows={(summary ?? []).map((s) => [
+                  s.currency_code,
+                  s.sale_count,
+                  formatMoney(s.total_cash_value, s.currency_code),
+                  formatMoney(s.total_markup, s.currency_code),
+                  formatMoney(s.total_installment_value, s.currency_code),
+                  formatMoney(s.total_collected, s.currency_code),
+                  formatMoney(s.total_outstanding, s.currency_code),
+                ])}
+              />
             </div>
           </div>
         </CardHeader>
@@ -130,7 +142,14 @@ export function ReportsPage({ onSelectCustomer }: { onSelectCustomer: (id: numbe
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle>الأكثر مبيعاً</CardTitle>
+            <div className="flex items-center justify-between">
+              <CardTitle>الأكثر مبيعاً</CardTitle>
+              <ExportCsvButton
+                filename="الأكثر-مبيعاً.csv"
+                headers={["#", "المنتج", "الكمية المباعة", "الإيرادات"]}
+                rows={(topProducts ?? []).map((p, i) => [i + 1, p.product_name, p.total_quantity, formatAmounts(p.revenue_by_currency)])}
+              />
+            </div>
           </CardHeader>
           <CardContent>
             {!topProducts && <p className="text-sm text-muted-foreground">جارٍ التحميل...</p>}
@@ -154,7 +173,14 @@ export function ReportsPage({ onSelectCustomer }: { onSelectCustomer: (id: numbe
 
         <Card>
           <CardHeader>
-            <CardTitle>أكثر الزبائن شراءً</CardTitle>
+            <div className="flex items-center justify-between">
+              <CardTitle>أكثر الزبائن شراءً</CardTitle>
+              <ExportCsvButton
+                filename="أكثر-الزبائن-شراءً.csv"
+                headers={["#", "الزبون", "عدد العمليات", "إجمالي المشتريات"]}
+                rows={(topCustomers ?? []).map((c, i) => [i + 1, c.customer_name, c.sale_count, formatAmounts(c.total_purchased_by_currency)])}
+              />
+            </div>
           </CardHeader>
           <CardContent>
             {!topCustomers && <p className="text-sm text-muted-foreground">جارٍ التحميل...</p>}
@@ -183,7 +209,19 @@ export function ReportsPage({ onSelectCustomer }: { onSelectCustomer: (id: numbe
 
       <Card>
         <CardHeader>
-          <CardTitle>الأكثر تأخراً بالتسديد</CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle>الأكثر تأخراً بالتسديد</CardTitle>
+            <ExportCsvButton
+              filename="الأكثر-تأخراً-بالتسديد.csv"
+              headers={["الزبون", "عدد الأقساط المتأخرة", "أطول تأخير (يوم)", "المبلغ المتأخر"]}
+              rows={(mostOverdue ?? []).map((c) => [
+                c.customer_name,
+                c.overdue_installment_count,
+                c.max_days_overdue,
+                formatAmounts(c.overdue_amount_by_currency),
+              ])}
+            />
+          </div>
         </CardHeader>
         <CardContent>
           {!mostOverdue && <p className="text-sm text-muted-foreground">جارٍ التحميل...</p>}
@@ -221,7 +259,20 @@ export function ReportsPage({ onSelectCustomer }: { onSelectCustomer: (id: numbe
 
       <Card>
         <CardHeader>
-          <CardTitle>نظرة عامة على الزبائن</CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle>نظرة عامة على الزبائن</CardTitle>
+            <ExportCsvButton
+              filename="نظرة-عامة-على-الزبائن.csv"
+              headers={["الزبون", "عدد المبيعات", "إجمالي المشتريات", "المتبقي", "آخر عملية"]}
+              rows={(overview ?? []).map((c) => [
+                c.customer_name,
+                c.sale_count,
+                formatAmounts(c.total_purchased_by_currency),
+                formatAmounts(c.total_remaining_by_currency),
+                c.last_sale_date ?? "—",
+              ])}
+            />
+          </div>
         </CardHeader>
         <CardContent>
           {!overview && <p className="text-sm text-muted-foreground">جارٍ التحميل...</p>}
@@ -253,6 +304,8 @@ export function ReportsPage({ onSelectCustomer }: { onSelectCustomer: (id: numbe
           )}
         </CardContent>
       </Card>
+
+      <CurrencyConversionReport range={range} onSelectCustomer={onSelectCustomer} />
     </div>
   );
 }
