@@ -7,6 +7,7 @@ import { CustomerStatement } from "@/features/reporting/CustomerStatement";
 import { OverduePage } from "@/features/reporting/OverduePage";
 import { ReportsPage } from "@/features/reporting/ReportsPage";
 import { NewSalePage } from "@/features/sales/NewSalePage";
+import { UpdateChecker } from "@/features/settings/UpdateChecker";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -16,15 +17,17 @@ type View =
   | { tab: "new-sale" }
   | { tab: "overdue" }
   | { tab: "reports" }
+  | { tab: "about" }
   | { tab: "customer-detail"; customerId: number }
   | { tab: "customer-statement"; customerId: number };
 
-const TABS: { tab: "customers" | "products" | "new-sale" | "overdue" | "reports"; label: string }[] = [
+const TABS: { tab: "customers" | "products" | "new-sale" | "overdue" | "reports" | "about"; label: string }[] = [
   { tab: "customers", label: "العملاء" },
   { tab: "products", label: "المنتجات" },
   { tab: "new-sale", label: "بيع جديد" },
   { tab: "overdue", label: "المتأخرات" },
   { tab: "reports", label: "التقارير" },
+  { tab: "about", label: "حول البرنامج" },
 ];
 
 function App() {
@@ -77,6 +80,7 @@ function App() {
           {view.tab === "reports" && (
             <ReportsPage onSelectCustomer={(id) => setView({ tab: "customer-detail", customerId: id })} />
           )}
+          {view.tab === "about" && <UpdateChecker />}
           {view.tab === "customer-detail" && (
             <CustomerDetail
               customerId={view.customerId}
