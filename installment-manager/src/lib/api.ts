@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 export type CurrencyCode = "IQD" | "USD";
 export type MarkupType = "flat" | "percentage";
 export type InstallmentStatus = "Pending" | "Partial" | "Paid";
+export type InstallmentPeriodUnit = "months" | "days";
 
 export type LicenseStatus =
   | { state: "NotActivated" }
@@ -61,6 +62,7 @@ export interface CreditSale {
   guarantor_name: string | null;
   sale_date: string;
   agreed_months: number;
+  installment_period_unit: InstallmentPeriodUnit;
   applied_markup_value: number;
   total_installment_price: number;
   currency_code: CurrencyCode;
@@ -122,6 +124,7 @@ export function createCreditSale(payload: {
   markup_type: MarkupType;
   markup_input: number;
   agreed_months: number;
+  installment_period_unit: InstallmentPeriodUnit;
   currency_code: CurrencyCode;
   manual_exchange_rate_micros: number;
 }): Promise<CreditSale> {

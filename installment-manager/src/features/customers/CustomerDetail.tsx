@@ -6,6 +6,7 @@ import {
   type CreditSale,
   type Customer,
   type CurrencyCode,
+  type InstallmentPeriodUnit,
   type InstallmentStatus,
 } from "@/lib/api";
 import { formatMoney, todayIso, toStorageAmount } from "@/lib/format";
@@ -62,16 +63,22 @@ export function CustomerDetail({
   }, [customerId]);
 
   const totals = useMemo(() => {
-    const byCurrency = new Map<CurrencyCode, { total: number; remaining: number; monthlyTotal: number }>();
+    const byCurrency = new Map<
+      CurrencyCode,
+      { total: number; remaining: number; perPeriodTotal: Partial<Record<InstallmentPeriodUnit, number>> }
+    >();
     for (const sale of sales) {
-      const entry = byCurrency.get(sale.currency_code) ?? { total: 0, remaining: 0, monthlyTotal: 0 };
+      const entry = byCurrency.get(sale.currency_code) ?? { total: 0, remaining: 0, perPeriodTotal: {} };
       entry.total += sale.total_installment_price;
       const saleRemaining = sale.installments.reduce((sum, i) => sum + i.remaining_amount, 0);
       entry.remaining += saleRemaining;
-      // Only sales still owed anything contribute to the monthly total —
-      // a fully paid-off sale no longer costs the customer per month.
+      // Only sales still owed anything contribute to the recurring total —
+      // a fully paid-off sale no longer costs the customer anything. Kept
+      // separate per period unit (monthly vs. daily sales aren't the same
+      // recurring cost, so they're never summed together).
       if (saleRemaining > 0 && sale.installments.length > 0) {
-        entry.monthlyTotal += sale.installments[0].scheduled_amount;
+        const unit = sale.installment_period_unit;
+        entry.perPeriodTotal[unit] = (entry.perPeriodTotal[unit] ?? 0) + sale.installments[0].scheduled_amount;
       }
       byCurrency.set(sale.currency_code, entry);
     }
@@ -144,10 +151,16 @@ export function CustomerDetail({
                 <span className="text-muted-foreground">المتبقي ({cur}): </span>
                 <span className="font-medium">{formatMoney(t.remaining, cur)}</span>
               </span>
-              {t.monthlyTotal > 0 && (
+              {!!t.perPeriodTotal.months && (
                 <span>
                   <span className="text-muted-foreground">إجمالي القسط الشهري ({cur}): </span>
-                  <span className="font-medium">{formatMoney(t.monthlyTotal, cur)}</span>
+                  <span className="font-medium">{formatMoney(t.perPeriodTotal.months, cur)}</span>
+                </span>
+              )}
+              {!!t.perPeriodTotal.days && (
+                <span>
+                  <span className="text-muted-foreground">إجمالي القسط اليومي ({cur}): </span>
+                  <span className="font-medium">{formatMoney(t.perPeriodTotal.days, cur)}</span>
                 </span>
               )}
             </div>
@@ -166,7 +179,9 @@ export function CustomerDetail({
                   <span>
                     فاتورة #{sale.id} — {sale.sale_date} — {formatMoney(sale.total_installment_price, sale.currency_code)}
                   </span>
-                  <span className="text-muted-foreground">{sale.agreed_months} قسط</span>
+                  <span className="text-muted-foreground">
+                    {sale.agreed_months} قسط ({sale.installment_period_unit === "days" ? "يومي" : "شهري"})
+                  </span>
                 </CardTitle>
               </CardHeader>
               <CardContent className="flex flex-col gap-3">

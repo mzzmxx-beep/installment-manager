@@ -5,6 +5,7 @@ import {
   getCustomers,
   type CurrencyCode,
   type Customer,
+  type InstallmentPeriodUnit,
   type MarkupType,
   type Product,
 } from "@/lib/api";
@@ -34,6 +35,7 @@ export function NewSalePage({ onCreated }: { onCreated: (customerId: number) => 
   const [markupType, setMarkupType] = useState<MarkupType>("percentage");
   const [markupInput, setMarkupInput] = useState("0");
   const [agreedMonths, setAgreedMonths] = useState("6");
+  const [periodUnit, setPeriodUnit] = useState<InstallmentPeriodUnit>("months");
   const [exchangeRate, setExchangeRate] = useState("1");
 
   useEffect(() => {
@@ -72,6 +74,7 @@ export function NewSalePage({ onCreated }: { onCreated: (customerId: number) => 
   const total = cashTotal + markupValue;
   const months = Number(agreedMonths) || 0;
   const approxInstallment = months > 0 ? Math.floor(total / months) : 0;
+  const periodUnitLabel = periodUnit === "days" ? "يوم" : "شهر";
 
   function updateItem(index: number, patch: Partial<ItemRow>) {
     setItems((prev) => prev.map((row, i) => (i === index ? { ...row, ...patch } : row)));
@@ -116,6 +119,7 @@ export function NewSalePage({ onCreated }: { onCreated: (customerId: number) => 
         markup_type: markupType,
         markup_input: markupType === "flat" ? toStorageAmount(markupInput, currency) : Math.round((Number(markupInput) || 0) * 100),
         agreed_months: months,
+        installment_period_unit: periodUnit,
         currency_code: currency,
         manual_exchange_rate_micros: rateMicros,
       });
@@ -238,15 +242,27 @@ export function NewSalePage({ onCreated }: { onCreated: (customerId: number) => 
                 />
               </div>
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="s-months">عدد الأقساط (أشهر)</Label>
-                <Input
-                  id="s-months"
-                  type="number"
-                  min="1"
-                  required
-                  value={agreedMonths}
-                  onChange={(e) => setAgreedMonths(e.target.value)}
-                />
+                <Label htmlFor="s-months">عدد الأقساط</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="s-months"
+                    type="number"
+                    min="1"
+                    required
+                    className="flex-1"
+                    value={agreedMonths}
+                    onChange={(e) => setAgreedMonths(e.target.value)}
+                  />
+                  <Select
+                    className="w-28"
+                    aria-label="نوع فترة القسط"
+                    value={periodUnit}
+                    onChange={(e) => setPeriodUnit(e.target.value as InstallmentPeriodUnit)}
+                  >
+                    <option value="months">أشهر</option>
+                    <option value="days">أيام</option>
+                  </Select>
+                </div>
               </div>
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="s-rate">سعر الصرف اليدوي (دينار مقابل دولار واحد)</Label>
@@ -289,7 +305,7 @@ export function NewSalePage({ onCreated }: { onCreated: (customerId: number) => 
             <span>{formatMoney(total, currency)}</span>
           </div>
           <div className="flex justify-between text-muted-foreground">
-            <span>القسط التقريبي / شهر</span>
+            <span>القسط التقريبي / {periodUnitLabel}</span>
             <span>{formatMoney(approxInstallment, currency)}</span>
           </div>
           <p className="mt-2 text-xs text-muted-foreground">
