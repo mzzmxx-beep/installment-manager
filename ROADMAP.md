@@ -174,7 +174,7 @@ Added 2026-08-23, per direct request:
 ## Post-Phase-8 updates (not in the original plan) — ✅ Complete
 
 Added 2026-09-05, per direct request:
-- **Daily-collection sales (v1.3.0)**: a `CreditSale` can now space its
+- **Daily-collection sales (v1.2.1)**: a `CreditSale` can now space its
   installment schedule by day instead of always by calendar month —
   `credit_sale.installment_period_unit` (migration `0006`, `'months'` or
   `'days'`, default `'months'`), resolved by `engine::generate_schedule`
