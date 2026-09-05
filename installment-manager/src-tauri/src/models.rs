@@ -102,6 +102,12 @@ pub struct CreateCreditSalePayload {
     pub markup_type: MarkupType,
     pub markup_input: i64,
     pub agreed_months: i32,
+    /// How `agreed_months` is spaced into due dates: `"months"` (one
+    /// calendar month apart, the original behavior) or `"days"` (one day
+    /// apart, for daily-collection sales). Plain `String` rather than a Rust
+    /// enum, same convention as `currency_code` — validated against the
+    /// DB's own CHECK constraint (ARCHITECTURE.md §8).
+    pub installment_period_unit: String,
     pub currency_code: String,
     pub manual_exchange_rate_micros: i64,
 }
@@ -120,6 +126,8 @@ pub struct CreditSaleDto {
     pub guarantor_name: Option<String>,
     pub sale_date: String,
     pub agreed_months: i32,
+    /// See `CreateCreditSalePayload::installment_period_unit`.
+    pub installment_period_unit: String,
     pub applied_markup_value: i64,
     pub total_installment_price: i64,
     pub currency_code: String,

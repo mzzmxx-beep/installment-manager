@@ -2,8 +2,16 @@ use chrono::NaiveDate;
 use rusqlite::{params, Connection};
 
 use crate::audit;
-use crate::engine;
+use crate::engine::{self, PeriodUnit};
 use crate::models::{CreateCreditSalePayload, CreditSaleDto, CreditSaleItemDto, InstallmentDto};
+
+fn parse_period_unit(value: &str) -> Result<PeriodUnit, String> {
+    match value {
+        "months" => Ok(PeriodUnit::Months),
+        "days" => Ok(PeriodUnit::Days),
+        other => Err(format!("invalid installment_period_unit: {other}")),
+    }
+}
 
 /// Creates a CreditSale and its items/installments inside a single
 /// transaction (ARCHITECTURE.md §3, §4): a half-written sale must never be
@@ -21,6 +29,7 @@ pub fn create_credit_sale(
     if payload.guarantor_id == Some(payload.customer_id) {
         return Err("a customer cannot guarantee their own sale".into());
     }
+    let period_unit = parse_period_unit(&payload.installment_period_unit)?;
 
     let sale_date = NaiveDate::parse_from_str(&payload.sale_date, "%Y-%m-%d")
         .map_err(|e| format!("invalid sale_date: {e}"))?;
@@ -67,14 +76,15 @@ pub fn create_credit_sale(
 
     tx.execute(
         "INSERT INTO credit_sale (
-            customer_id, guarantor_id, sale_date, agreed_months, applied_markup_value,
-            total_installment_price, currency_code, manual_exchange_rate_micros
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            customer_id, guarantor_id, sale_date, agreed_months, installment_period_unit,
+            applied_markup_value, total_installment_price, currency_code, manual_exchange_rate_micros
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         params![
             payload.customer_id,
             payload.guarantor_id,
             payload.sale_date,
             payload.agreed_months,
+            payload.installment_period_unit,
             applied_markup_value,
             total_installment_price,
             payload.currency_code,
@@ -102,7 +112,7 @@ pub fn create_credit_sale(
         });
     }
 
-    let schedule = engine::generate_schedule(total_installment_price, payload.agreed_months, sale_date);
+    let schedule = engine::generate_schedule(total_installment_price, payload.agreed_months, sale_date, period_unit);
     let mut installments = Vec::with_capacity(schedule.len());
     for scheduled in schedule {
         let due_date = scheduled.due_date.format("%Y-%m-%d").to_string();
@@ -141,6 +151,7 @@ pub fn create_credit_sale(
         guarantor_name,
         sale_date: payload.sale_date,
         agreed_months: payload.agreed_months,
+        installment_period_unit: payload.installment_period_unit,
         applied_markup_value,
         total_installment_price,
         currency_code: payload.currency_code,
@@ -162,7 +173,7 @@ pub fn get_sales_for_customer(conn: &Connection, customer_id: i64) -> rusqlite::
     let mut sale_stmt = conn.prepare(
         "SELECT cs.id, cs.customer_id, cs.guarantor_id, cs.sale_date, cs.agreed_months, cs.applied_markup_value,
                 cs.total_installment_price, cs.currency_code, cs.manual_exchange_rate_micros, cs.created_at,
-                g.name AS guarantor_name
+                g.name AS guarantor_name, cs.installment_period_unit
          FROM credit_sale cs
          LEFT JOIN customer g ON g.id = cs.guarantor_id
          WHERE cs.customer_id = ?1
@@ -183,6 +194,7 @@ pub fn get_sales_for_customer(conn: &Connection, customer_id: i64) -> rusqlite::
                 manual_exchange_rate_micros: row.get(8)?,
                 created_at: row.get(9)?,
                 guarantor_name: row.get(10)?,
+                installment_period_unit: row.get(11)?,
                 items: Vec::new(),
                 installments: Vec::new(),
             })
@@ -287,6 +299,7 @@ mod tests {
                 markup_type: MarkupType::Percentage,
                 markup_input: 1_000, // 10%
                 agreed_months: 3,
+                installment_period_unit: "months".into(),
                 currency_code: "IQD".into(),
                 manual_exchange_rate_micros: 1_000_000,
             },
@@ -309,6 +322,60 @@ mod tests {
     }
 
     #[test]
+    fn create_sale_with_days_period_unit_spaces_installments_daily() {
+        let mut conn = init_test_db();
+        let (customer_id, product_id) = setup_customer_and_product(&conn);
+
+        let sale = create_credit_sale(
+            &mut conn,
+            CreateCreditSalePayload {
+                customer_id,
+                guarantor_id: None,
+                sale_date: "2026-01-15".into(),
+                items: vec![CreditSaleItemInput { product_id, quantity: 1 }],
+                markup_type: MarkupType::Flat,
+                markup_input: 0,
+                agreed_months: 5,
+                installment_period_unit: "days".into(),
+                currency_code: "IQD".into(),
+                manual_exchange_rate_micros: 1_000_000,
+            },
+        )
+        .expect("create_credit_sale with a days period unit should succeed");
+
+        assert_eq!(sale.installment_period_unit, "days");
+        assert_eq!(sale.installments.len(), 5);
+        assert_eq!(sale.installments[0].due_date, "2026-01-16");
+        assert_eq!(sale.installments[4].due_date, "2026-01-20");
+
+        let fetched = get_sales_for_customer(&conn, customer_id).unwrap();
+        assert_eq!(fetched[0].installment_period_unit, "days");
+    }
+
+    #[test]
+    fn rejects_invalid_period_unit() {
+        let mut conn = init_test_db();
+        let (customer_id, product_id) = setup_customer_and_product(&conn);
+
+        let result = create_credit_sale(
+            &mut conn,
+            CreateCreditSalePayload {
+                customer_id,
+                guarantor_id: None,
+                sale_date: "2026-01-15".into(),
+                items: vec![CreditSaleItemInput { product_id, quantity: 1 }],
+                markup_type: MarkupType::Flat,
+                markup_input: 0,
+                agreed_months: 1,
+                installment_period_unit: "weeks".into(),
+                currency_code: "IQD".into(),
+                manual_exchange_rate_micros: 1_000_000,
+            },
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn rejects_empty_items() {
         let mut conn = init_test_db();
         let (customer_id, _) = setup_customer_and_product(&conn);
@@ -323,6 +390,7 @@ mod tests {
                 markup_type: MarkupType::Flat,
                 markup_input: 0,
                 agreed_months: 3,
+                installment_period_unit: "months".into(),
                 currency_code: "IQD".into(),
                 manual_exchange_rate_micros: 1_000_000,
             },
@@ -345,6 +413,7 @@ mod tests {
                 markup_type: MarkupType::Flat,
                 markup_input: 0,
                 agreed_months: 3,
+                installment_period_unit: "months".into(),
                 currency_code: "IQD".into(),
                 manual_exchange_rate_micros: 1_000_000,
             },
@@ -377,6 +446,7 @@ mod tests {
                 markup_type: MarkupType::Flat,
                 markup_input: 0,
                 agreed_months: 1,
+                installment_period_unit: "months".into(),
                 currency_code: "IQD".into(),
                 manual_exchange_rate_micros: 1_000_000,
             },
@@ -424,6 +494,7 @@ mod tests {
                 markup_type: MarkupType::Flat,
                 markup_input: 0,
                 agreed_months: 1,
+                installment_period_unit: "months".into(),
                 currency_code: "IQD".into(),
                 manual_exchange_rate_micros: 1_500_000_000, // 1,500 IQD / USD
             },

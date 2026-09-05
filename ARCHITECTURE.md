@@ -149,7 +149,9 @@ Every command above returns typed DTOs, never raw table rows (§3).
 - **Flexible Markup:** `Cash Price + Custom Markup = Installment Price`.
   - Markup is entered manually per sale, either as a percentage or a
     flat amount (seller's choice per transaction).
-  - Number of months is a manual input per sale.
+  - Number of installments is a manual input per sale, spaced either
+    monthly or daily (`installment_period_unit`, per-sale choice, added
+    in migration `0006`) — daily spacing serves daily-collection sales.
   - Once a `CreditSale` is created, the resolved markup value, markup
     type, months, and computed installment price are saved as an
     **immutable snapshot** on that sale/plan. Later changes to any
@@ -260,7 +262,12 @@ but the fields, semantics, and rules below are binding):
   out of sync with the real one.
 - `CreditSale`: `id`, `customer_id`, `guarantor_id` (nullable FK to
   **`Customer`**, not a separate table — must differ from
-  `customer_id`), `sale_date`, `agreed_months` (INTEGER),
+  `customer_id`), `sale_date`, `agreed_months` (INTEGER — the installment
+  *count*, regardless of unit; kept its original name across migration
+  `0006` rather than being renamed, since it only ever meant "how many
+  installments"), `installment_period_unit` (TEXT, `'months'` or
+  `'days'`, default `'months'` — added by migration `0006`; says how far
+  apart each installment's due date is spaced, see §5),
   `applied_markup_value` (INTEGER — the resolved exact amount, not a
   percentage), `total_installment_price` (INTEGER), `currency_code`,
   `manual_exchange_rate_micros` (INTEGER, IQD per 1 USD ×1,000,000).
@@ -282,6 +289,10 @@ but the fields, semantics, and rules below are binding):
 - The financial engine deterministically divides `total_installment_price`
   by `agreed_months`; any fractional remainder is added to the **final**
   installment (see §5) so the schedule always sums exactly to the total.
+  Due dates are spaced one `installment_period_unit` apart (one calendar
+  month, or one day) starting one unit after `sale_date` — the unit is a
+  per-sale choice, immutable once the sale is created, same as everything
+  else on `CreditSale` (§6).
 
 ### Payment & PaymentAllocation (The Ledger)
 - `Payment`: `id`, `customer_id`, `payment_date`, `amount_paid`

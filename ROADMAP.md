@@ -170,3 +170,28 @@ Added 2026-08-23, per direct request:
   invoice; a customer's combined monthly installment total displays
   correctly; updating an existing install preserves its database and
   activated license. All met.
+
+## Post-Phase-8 updates (not in the original plan) — ✅ Complete
+
+Added 2026-09-05, per direct request:
+- **Daily-collection sales (v1.2.1)**: a `CreditSale` can now space its
+  installment schedule by day instead of always by calendar month —
+  `credit_sale.installment_period_unit` (migration `0006`, `'months'` or
+  `'days'`, default `'months'`), resolved by `engine::generate_schedule`
+  which now takes a `PeriodUnit` and advances due dates by day or by
+  month accordingly. `agreed_months` keeps its name and still holds the
+  installment *count* regardless of unit — renaming it would have
+  touched every DTO/query for no behavioral gain. The New Sale form gained
+  a أشهر/أيام selector next to the installment-count field (defaulting to
+  أشهر, the original behavior); the customer detail page's combined
+  recurring-installment total is now reported separately per unit
+  (monthly vs. daily), since the two aren't the same kind of recurring
+  cost and were never meant to be summed together.
+- **Exit criteria:** a sale created with the "أيام" unit produces
+  installments due one day apart instead of one month apart, sums
+  exactly to the total (remainder still folds into the last installment),
+  and round-trips correctly through `get_sales_for_customer`. All met —
+  covered by new Rust unit/integration tests
+  (`engine::tests::schedule_with_days_unit_spaces_installments_one_day_apart`,
+  `repo::sale::tests::create_sale_with_days_period_unit_spaces_installments_daily`,
+  `repo::sale::tests::rejects_invalid_period_unit`).

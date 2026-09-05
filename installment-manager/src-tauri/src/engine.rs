@@ -4,9 +4,19 @@
 //! rules (round-half-up, remainder-to-last-installment, oldest-first
 //! allocation) can be unit tested in isolation from the database.
 
-use chrono::{Datelike, NaiveDate};
+use chrono::{Datelike, Duration, NaiveDate};
 
 use crate::models::MarkupType;
+
+/// How installment due dates are spaced apart (see
+/// `models::CreateCreditSalePayload::installment_period_unit`, which carries
+/// this as a plain string across the IPC boundary — this enum is the
+/// engine's internal, validated representation of that string).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PeriodUnit {
+    Months,
+    Days,
+}
 
 /// Rounds `numerator / denominator` half-up. The single rounding point for
 /// all money math (ARCHITECTURE.md §5) — never round mid-calculation.
@@ -31,22 +41,24 @@ pub struct ScheduledInstallment {
     pub amount: i64,
 }
 
-/// Splits `total` evenly across `months` monthly installments starting one
-/// month after `sale_date`. Any remainder from integer division is folded
-/// into the final installment so the schedule always sums to `total`
-/// exactly (ARCHITECTURE.md §5).
-pub fn generate_schedule(total: i64, months: i32, sale_date: NaiveDate) -> Vec<ScheduledInstallment> {
-    assert!(months > 0, "agreed_months must be positive");
-    let base = total / months as i64;
-    let remainder = total - base * months as i64;
+/// Splits `total` evenly across `count` installments, due one `unit` apart
+/// starting one `unit` after `sale_date` (e.g. `Months` -> the 1st, 2nd, 3rd
+/// calendar month after the sale; `Days` -> the 1st, 2nd, 3rd day after).
+/// Any remainder from integer division is folded into the final installment
+/// so the schedule always sums to `total` exactly (ARCHITECTURE.md §5).
+pub fn generate_schedule(total: i64, count: i32, sale_date: NaiveDate, unit: PeriodUnit) -> Vec<ScheduledInstallment> {
+    assert!(count > 0, "agreed_months must be positive");
+    let base = total / count as i64;
+    let remainder = total - base * count as i64;
 
-    (1..=months)
+    (1..=count)
         .map(|i| {
-            let amount = if i == months { base + remainder } else { base };
-            ScheduledInstallment {
-                due_date: add_months(sale_date, i),
-                amount,
-            }
+            let amount = if i == count { base + remainder } else { base };
+            let due_date = match unit {
+                PeriodUnit::Months => add_months(sale_date, i),
+                PeriodUnit::Days => sale_date + Duration::days(i as i64),
+            };
+            ScheduledInstallment { due_date, amount }
         })
         .collect()
 }
@@ -161,7 +173,7 @@ mod tests {
     #[test]
     fn schedule_sums_exactly_to_total_with_remainder_on_last() {
         let sale_date = NaiveDate::from_ymd_opt(2026, 1, 31).unwrap();
-        let schedule = generate_schedule(1_000, 3, sale_date);
+        let schedule = generate_schedule(1_000, 3, sale_date, PeriodUnit::Months);
 
         assert_eq!(schedule.len(), 3);
         assert_eq!(schedule[0].amount, 333);
@@ -173,6 +185,18 @@ mod tests {
         assert_eq!(schedule[0].due_date, NaiveDate::from_ymd_opt(2026, 2, 28).unwrap());
         assert_eq!(schedule[1].due_date, NaiveDate::from_ymd_opt(2026, 3, 31).unwrap());
         assert_eq!(schedule[2].due_date, NaiveDate::from_ymd_opt(2026, 4, 30).unwrap());
+    }
+
+    #[test]
+    fn schedule_with_days_unit_spaces_installments_one_day_apart() {
+        let sale_date = NaiveDate::from_ymd_opt(2026, 1, 31).unwrap();
+        let schedule = generate_schedule(1_000, 3, sale_date, PeriodUnit::Days);
+
+        assert_eq!(schedule.len(), 3);
+        assert_eq!(schedule.iter().map(|s| s.amount).sum::<i64>(), 1_000);
+        assert_eq!(schedule[0].due_date, NaiveDate::from_ymd_opt(2026, 2, 1).unwrap());
+        assert_eq!(schedule[1].due_date, NaiveDate::from_ymd_opt(2026, 2, 2).unwrap());
+        assert_eq!(schedule[2].due_date, NaiveDate::from_ymd_opt(2026, 2, 3).unwrap());
     }
 
     #[test]

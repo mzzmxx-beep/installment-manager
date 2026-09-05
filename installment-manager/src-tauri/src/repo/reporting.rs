@@ -142,6 +142,7 @@ mod tests {
                 markup_type: MarkupType::Flat,
                 markup_input: 0,
                 agreed_months: months,
+                installment_period_unit: "months".into(),
                 currency_code: "IQD".into(),
                 manual_exchange_rate_micros: 1_000_000,
             },
