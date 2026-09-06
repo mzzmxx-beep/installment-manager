@@ -153,8 +153,9 @@ async function loadTenants() {
         <td><span class="badge \${escapeHtml(t.status)}">\${escapeHtml(statusLabel(t.status))}</span></td>
         <td>\${escapeHtml(expires)}</td>
         <td class="row-actions">
-          <button data-action="extend" data-id="\${escapeHtml(t.id)}">تمديد 30 يوم</button>
+          <button data-action="extend" data-id="\${escapeHtml(t.id)}">تمديد سنة</button>
           <button class="danger" data-action="suspend" data-id="\${escapeHtml(t.id)}">إيقاف</button>
+          <button class="secondary" data-reset-id="\${escapeHtml(t.id)}" data-shop-name="\${escapeHtml(t.shop_name)}">تغيير كلمة المرور</button>
           <button class="danger-outline" data-delete-id="\${escapeHtml(t.id)}" data-shop-name="\${escapeHtml(t.shop_name)}">حذف نهائي</button>
         </td>
       \`;
@@ -166,6 +167,9 @@ async function loadTenants() {
     body.querySelectorAll("button[data-delete-id]").forEach((btn) => {
       btn.addEventListener("click", () => handleDeleteTenant(btn.dataset.deleteId, btn.dataset.shopName));
     });
+    body.querySelectorAll("button[data-reset-id]").forEach((btn) => {
+      btn.addEventListener("click", () => handleResetPassword(btn.dataset.resetId, btn.dataset.shopName));
+    });
   } catch (e) {
     errEl.textContent = e.message;
     errEl.classList.remove("hidden");
@@ -175,13 +179,35 @@ async function loadTenants() {
 async function handleSubscriptionAction(tenantId, action) {
   const payload = { action };
   if (action === "extend") {
+    // A full calendar year from today (setFullYear handles leap years
+    // correctly, unlike approximating with +365 days).
     const d = new Date();
-    d.setDate(d.getDate() + 30);
+    d.setFullYear(d.getFullYear() + 1);
     payload.new_expires_at = d.toISOString();
   }
   try {
     await api(\`/admin/tenants/\${tenantId}/subscription\`, { method: "POST", body: JSON.stringify(payload) });
     await loadTenants();
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
+// The owner's only way to recover a forgotten password today is calling
+// the admin -- there's no self-service reset flow on installment-web
+// yet. Plain window.prompt() shows the typed password in the clear,
+// which is an acceptable tradeoff for this single-operator internal
+// tool (matches how the "add tenant" form itself handles passwords).
+async function handleResetPassword(tenantId, shopName) {
+  const newPassword = window.prompt(\`كلمة مرور جديدة لمالك "\${shopName}" (٨ أحرف على الأقل):\`);
+  if (newPassword === null) return;
+  if (newPassword.length < 8) {
+    alert("كلمة المرور يجب أن تكون ٨ أحرف على الأقل.");
+    return;
+  }
+  try {
+    await api(\`/admin/tenants/\${tenantId}/reset-password\`, { method: "POST", body: JSON.stringify({ new_password: newPassword }) });
+    alert("تم تغيير كلمة المرور. أعطِ الزبون كلمة المرور الجديدة.");
   } catch (e) {
     alert(e.message);
   }

@@ -2,9 +2,14 @@
 // Web Crypto -- available natively in the Workers runtime, so no external
 // crypto dependency is needed for this.
 
-// OWASP's current floor for PBKDF2-HMAC-SHA256 (600k) is the target;
-// Workers' CPU budget comfortably covers it (well under 100ms).
-const PBKDF2_ITERATIONS = 600_000;
+// OWASP's current floor for PBKDF2-HMAC-SHA256 is 600k, but the Workers
+// runtime's crypto.subtle hard-caps PBKDF2 at 100_000 iterations and
+// throws for anything higher (found the hard way: this was 600_000 for
+// one deploy and silently broke every hashPassword call -- new tenant
+// creation and password resets both started failing with a 500, since
+// nothing exercised that path in testing until a real reset attempt
+// hit it). 100_000 is the actual ceiling here, not a deliberate choice.
+const PBKDF2_ITERATIONS = 100_000;
 
 /** Constant-time string equality -- avoids leaking how much of a hash
  * matched via early-exit timing on a plain `===` comparison. Lengths

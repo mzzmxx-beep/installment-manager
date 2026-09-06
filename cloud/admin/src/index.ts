@@ -226,6 +226,30 @@ app.post("/admin/tenants/:id/subscription", async (c) => {
   return json(c, { ok: true });
 });
 
+interface ResetPasswordPayload {
+  newPassword: string;
+}
+
+/** Lets the admin set a new password for a tenant's owner account -- e.g. when the owner forgets theirs and calls/messages the admin directly (no self-service reset flow exists yet). */
+app.post("/admin/tenants/:id/reset-password", async (c) => {
+  const tenantId = c.req.param("id");
+  const tenant = await c.env.CONTROL_PLANE_DB.prepare("SELECT id FROM tenant WHERE id = ?1").bind(tenantId).first();
+  if (!tenant) throw new ApiError(404, "tenant not found");
+
+  const payload = await readBody<ResetPasswordPayload>(c);
+  if (!payload.newPassword || payload.newPassword.length < 8) {
+    throw new ApiError(400, "كلمة المرور يجب أن تكون ٨ أحرف على الأقل");
+  }
+
+  const passwordHash = await hashPassword(payload.newPassword);
+  const result = await c.env.CONTROL_PLANE_DB.prepare("UPDATE account SET password_hash = ?1 WHERE tenant_id = ?2 AND role = 'owner'")
+    .bind(passwordHash, tenantId)
+    .run();
+  if (result.meta.changes === 0) throw new ApiError(404, "owner account not found for this tenant");
+
+  return json(c, { ok: true });
+});
+
 interface DeleteTenantPayload {
   confirmShopName: string;
 }
