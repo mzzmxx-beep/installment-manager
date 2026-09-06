@@ -15,6 +15,8 @@
 --      license/trial state has no meaning once subscription status lives
 --      centrally in the Control Plane (cloud/control-plane) and is
 --      checked on every request instead.
+--   3. `customer_document` (مستمسكات photos) is dropped entirely --
+--      out of scope for the cloud product by decision.
 --
 -- Money/currency conventions carried over unchanged (ARCHITECTURE.md §5):
 --   * No REAL/FLOAT columns for money. USD is stored in cents, IQD as
@@ -114,17 +116,6 @@ CREATE TABLE audit_log (
 );
 CREATE INDEX idx_audit_log_table_record ON audit_log (table_name, record_id);
 
--- Customer document photos ("مستمسكات"). Unlike the original desktop
--- schema, the file itself is NOT stored here: D1 rows are not meant for
--- multi-megabyte BLOBs. `r2_key` instead points at the object in this
--- tenant's Cloudflare R2 bucket. Not append-only -- a mis-uploaded photo
--- may be deleted by application code.
-CREATE TABLE customer_document (
-    id           TEXT PRIMARY KEY,
-    customer_id  TEXT NOT NULL REFERENCES customer (id),
-    file_name    TEXT NOT NULL,
-    mime_type    TEXT NOT NULL,
-    r2_key       TEXT NOT NULL,
-    created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
-CREATE INDEX idx_customer_document_customer_id ON customer_document (customer_id);
+-- Note: the original desktop schema's `customer_document` table
+-- (مستمسكات photos) is deliberately dropped from the cloud product --
+-- out of scope by decision, not a technical gap.
