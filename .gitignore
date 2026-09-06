@@ -29,3 +29,6 @@ Thumbs.db
 # Local tooling state
 .claude/
 .wrangler/
+
+# Live credentials -- never push to the public repo
+وصول-سريع.md
