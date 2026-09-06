@@ -1,6 +1,8 @@
 import { Hono } from "hono";
+import type { Context } from "hono";
 import { hashPassword, signSession, verifyPassword, verifySession } from "./auth";
 import { ApiError } from "./db";
+import { toCamelCase, toSnakeCase } from "./case";
 import * as customerRepo from "./repo/customer";
 import * as productRepo from "./repo/product";
 import * as saleRepo from "./repo/sale";
@@ -22,7 +24,21 @@ type Variables = {
   tenantDb: D1Database;
 };
 
+type AppContext = Context<{ Bindings: Bindings; Variables: Variables }>;
+
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
+
+// The existing React frontend (installment-manager/src) was written
+// against the original Rust/serde wire format (snake_case field names).
+// This Worker's internal code uses idiomatic camelCase -- these two
+// helpers translate at the HTTP boundary so the frontend's data layer
+// carries over unmodified (see case.ts).
+async function readBody<T>(c: AppContext): Promise<T> {
+  return toCamelCase(await c.req.json()) as T;
+}
+function json(c: AppContext, data: unknown, status?: number) {
+  return c.json(toSnakeCase(data) as any, status as any);
+}
 
 app.onError((err, c) => {
   if (err instanceof ApiError) return c.json({ error: err.message }, err.status as any);
@@ -86,116 +102,116 @@ app.use("/api/*", async (c, next) => {
 // -- Customers ------------------------------------------------------------
 
 app.post("/api/customers", async (c) => {
-  const payload = await c.req.json<customerRepo.CreateCustomerPayload>();
+  const payload = await readBody<customerRepo.CreateCustomerPayload>(c);
   const dto = await customerRepo.createCustomer(c.get("tenantDb"), payload);
-  return c.json(dto, 201);
+  return json(c, dto, 201);
 });
 
 app.get("/api/customers", async (c) => {
   const search = c.req.query("search") ?? undefined;
   const dtos = await customerRepo.getCustomers(c.get("tenantDb"), search);
-  return c.json(dtos);
+  return json(c, dtos);
 });
 
 // -- Products ---------------------------------------------------------------
 
 app.post("/api/products", async (c) => {
-  const payload = await c.req.json<productRepo.CreateProductPayload>();
+  const payload = await readBody<productRepo.CreateProductPayload>(c);
   const dto = await productRepo.createProduct(c.get("tenantDb"), payload);
-  return c.json(dto, 201);
+  return json(c, dto, 201);
 });
 
 app.get("/api/products", async (c) => {
   const dtos = await productRepo.getActiveProducts(c.get("tenantDb"));
-  return c.json(dtos);
+  return json(c, dtos);
 });
 
 // -- Credit sales -----------------------------------------------------------
 
 app.post("/api/sales", async (c) => {
-  const payload = await c.req.json<saleRepo.CreateCreditSalePayload>();
+  const payload = await readBody<saleRepo.CreateCreditSalePayload>(c);
   const dto = await saleRepo.createCreditSale(c.get("tenantDb"), payload);
-  return c.json(dto, 201);
+  return json(c, dto, 201);
 });
 
 app.get("/api/customers/:customerId/sales", async (c) => {
   const dtos = await saleRepo.getSalesForCustomer(c.get("tenantDb"), c.req.param("customerId"));
-  return c.json(dtos);
+  return json(c, dtos);
 });
 
 // -- Payments -----------------------------------------------------------
 
 app.post("/api/payments", async (c) => {
-  const payload = await c.req.json<paymentRepo.CreatePaymentPayload>();
+  const payload = await readBody<paymentRepo.CreatePaymentPayload>(c);
   const dto = await paymentRepo.registerPayment(c.get("tenantDb"), payload);
-  return c.json(dto, 201);
+  return json(c, dto, 201);
 });
 
 app.get("/api/customers/:customerId/payments", async (c) => {
   const dtos = await paymentRepo.getPaymentsForCustomer(c.get("tenantDb"), c.req.param("customerId"));
-  return c.json(dtos);
+  return json(c, dtos);
 });
 
 // -- Reports & analytics -----------------------------------------------
 
 app.get("/api/customers/:customerId/statement", async (c) => {
   const dto = await reportingRepo.getCustomerStatement(c.get("tenantDb"), c.req.param("customerId"));
-  return c.json(dto);
+  return json(c, dto);
 });
 
 app.get("/api/reports/overdue-installments", async (c) => {
   const date = c.req.query("date") ?? new Date().toISOString().slice(0, 10);
   const dtos = await reportingRepo.getOverdueInstallments(c.get("tenantDb"), date);
-  return c.json(dtos);
+  return json(c, dtos);
 });
 
 app.get("/api/reports/sales-summary", async (c) => {
   const dtos = await analyticsRepo.getSalesSummary(c.get("tenantDb"), c.req.query("from"), c.req.query("to"));
-  return c.json(dtos);
+  return json(c, dtos);
 });
 
 app.get("/api/reports/top-products", async (c) => {
   const limit = Number(c.req.query("limit") ?? "10");
   const dtos = await analyticsRepo.getTopProducts(c.get("tenantDb"), limit);
-  return c.json(dtos);
+  return json(c, dtos);
 });
 
 app.get("/api/reports/top-customers", async (c) => {
   const limit = Number(c.req.query("limit") ?? "10");
   const dtos = await analyticsRepo.getTopCustomers(c.get("tenantDb"), limit);
-  return c.json(dtos);
+  return json(c, dtos);
 });
 
 app.get("/api/reports/most-overdue-customers", async (c) => {
   const date = c.req.query("date") ?? new Date().toISOString().slice(0, 10);
   const limit = Number(c.req.query("limit") ?? "10");
   const dtos = await analyticsRepo.getMostOverdueCustomers(c.get("tenantDb"), date, limit);
-  return c.json(dtos);
+  return json(c, dtos);
 });
 
 app.get("/api/reports/customers-overview", async (c) => {
   const dtos = await analyticsRepo.getCustomersOverview(c.get("tenantDb"));
-  return c.json(dtos);
+  return json(c, dtos);
 });
 
 app.get("/api/reports/sale-conversions", async (c) => {
   const dtos = await currencyReportRepo.getSaleConversions(c.get("tenantDb"), c.req.query("from"), c.req.query("to"));
-  return c.json(dtos);
+  return json(c, dtos);
 });
 
 app.get("/api/reports/payment-conversions", async (c) => {
   const dtos = await currencyReportRepo.getPaymentConversions(c.get("tenantDb"), c.req.query("from"), c.req.query("to"));
-  return c.json(dtos);
+  return json(c, dtos);
 });
 
 app.get("/api/reports/product-conversion-summary", async (c) => {
   const dtos = await currencyReportRepo.getProductConversionSummary(c.get("tenantDb"));
-  return c.json(dtos);
+  return json(c, dtos);
 });
 
 app.get("/api/reports/customer-conversion-summary", async (c) => {
   const dtos = await currencyReportRepo.getCustomerConversionSummary(c.get("tenantDb"));
-  return c.json(dtos);
+  return json(c, dtos);
 });
 
 export default app;
