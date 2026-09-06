@@ -5,7 +5,7 @@ import { hashPassword, verifyPassword, signSession, verifySession } from "./auth
 import { ApiError, newId } from "./db";
 import { toCamelCase, toSnakeCase } from "./case";
 import { createD1Database, deleteD1Database, runD1Query } from "./cloudflare";
-import { addTenantBindingAndRedeploy } from "./deployTenantApi";
+import { addTenantBindingAndRedeploy, removeTenantBindingAndRedeploy } from "./deployTenantApi";
 import { tenantSchemaStatements } from "./tenantSchema";
 import { ADMIN_PANEL_HTML } from "./adminPanel";
 import { checkLoginRateLimit, recordFailedLogin } from "./rateLimit";
@@ -222,6 +222,53 @@ app.post("/admin/tenants/:id/subscription", async (c) => {
   )
     .bind(newId(), tenantId, payload.action, payload.newExpiresAt ?? null, payload.note ?? null)
     .run();
+
+  return json(c, { ok: true });
+});
+
+interface DeleteTenantPayload {
+  confirmShopName: string;
+}
+
+/**
+ * Permanently and irreversibly deletes a tenant: cuts off
+ * installment-api's access to their database, removes every
+ * control-plane record (account, subscription history, the tenant
+ * itself), then destroys their D1 database -- in that order, so if
+ * anything fails partway the tenant is at worst locked out (recoverable
+ * by re-provisioning) rather than left with dangling references to an
+ * already-destroyed database.
+ *
+ * Requires the caller to resend the tenant's exact shop name as
+ * confirmation (the panel's own "type the name" prompt is client-side
+ * only -- a direct API call must prove the same intent).
+ */
+app.post("/admin/tenants/:id/delete", async (c) => {
+  if (!c.env.CF_API_TOKEN || !c.env.CF_ACCOUNT_ID || !c.env.TENANT_API_JWT_SECRET) {
+    throw new ApiError(501, "حذف الزبون يحتاج CF_API_TOKEN/CF_ACCOUNT_ID/TENANT_API_JWT_SECRET (راجع cloud/README.md)");
+  }
+  const tenantId = c.req.param("id");
+  const tenant = await c.env.CONTROL_PLANE_DB.prepare("SELECT id, shop_name, d1_database_id, binding_name FROM tenant WHERE id = ?1")
+    .bind(tenantId)
+    .first<{ id: string; shop_name: string; d1_database_id: string; binding_name: string | null }>();
+  if (!tenant) throw new ApiError(404, "tenant not found");
+
+  const payload = await readBody<DeleteTenantPayload>(c);
+  if (payload.confirmShopName !== tenant.shop_name) {
+    throw new ApiError(400, "اسم المحل المُدخَل للتأكيد غير مطابق");
+  }
+
+  if (tenant.binding_name) {
+    await removeTenantBindingAndRedeploy(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, tenant.binding_name, c.env.TENANT_API_JWT_SECRET);
+  }
+
+  await c.env.CONTROL_PLANE_DB.batch([
+    c.env.CONTROL_PLANE_DB.prepare("DELETE FROM subscription_event WHERE tenant_id = ?1").bind(tenantId),
+    c.env.CONTROL_PLANE_DB.prepare("DELETE FROM account WHERE tenant_id = ?1").bind(tenantId),
+    c.env.CONTROL_PLANE_DB.prepare("DELETE FROM tenant WHERE id = ?1").bind(tenantId),
+  ]);
+
+  await deleteD1Database(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, tenant.d1_database_id);
 
   return json(c, { ok: true });
 });

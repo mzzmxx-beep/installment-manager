@@ -1,14 +1,16 @@
-// Adds a new tenant's D1 binding to the live installment-api Worker and
-// redeploys it -- the piece that makes "add tenant" actually servable,
-// not just provisioned. See cloud/README.md for why this has to be a
-// real Worker binding (D1's HTTP management API can't provide the
+// Adds/removes a tenant's D1 binding on the live installment-api Worker
+// and redeploys it -- the piece that makes "add tenant" / "delete
+// tenant" actually take effect on the servable app, not just the
+// control plane. See cloud/README.md for why this has to be a real
+// Worker binding (D1's HTTP management API can't provide the
 // transaction atomicity money-critical writes need) rather than
 // something installment-api could do purely at request time.
 //
 // TENANT_API_BUNDLE is installment-api's compiled output, embedded so
-// this Worker can re-upload it unchanged (just with one more binding)
-// without needing its own copy of the source. It MUST be regenerated
-// whenever cloud/api's source changes -- see tenantApiBundle.ts's header.
+// this Worker can re-upload it unchanged (just with the binding list
+// changed) without needing its own copy of the source. It MUST be
+// regenerated whenever cloud/api's source changes -- see
+// tenantApiBundle.ts's header.
 
 import { TENANT_API_BUNDLE } from "./tenantApiBundle";
 
@@ -45,39 +47,22 @@ async function getCurrentBindings(accountId: string, apiToken: string): Promise<
 }
 
 /**
- * Adds a D1 binding for the given tenant database to installment-api
- * and pushes a new deployment -- existing bindings (including secret
- * values, which are never included/changed here) are preserved as-is.
- *
- * `jwtSecret` must be installment-api's current JWT_SECRET value.
- * Cloudflare's script-upload API is write-only for secrets -- it never
- * returns them, so a redeploy that omits a secret_text binding's value
- * fails outright rather than silently keeping the old one. This Worker
+ * Redeploys installment-api with the given binding list (unchanged
+ * script content). `jwtSecret` must be installment-api's current
+ * JWT_SECRET value -- Cloudflare's script-upload API is write-only for
+ * secrets, so a redeploy that omits a secret_text binding's value fails
+ * outright rather than silently keeping the old one. This Worker
  * therefore keeps its own copy as TENANT_API_JWT_SECRET, kept in sync by
  * hand whenever installment-api's JWT_SECRET is rotated (see
  * cloud/README.md).
  */
-export async function addTenantBindingAndRedeploy(
-  accountId: string,
-  apiToken: string,
-  bindingName: string,
-  tenantDatabaseId: string,
-  jwtSecret: string,
-): Promise<void> {
-  const currentBindings = await getCurrentBindings(accountId, apiToken);
-  if (currentBindings.some((b) => b.name === bindingName)) {
-    throw new Error(`binding "${bindingName}" already exists on ${SCRIPT_NAME}`);
-  }
-
-  const bindingsWithSecretValues = currentBindings.map((b) =>
-    b.type === "secret_text" ? { ...b, text: jwtSecret } : b,
-  );
-  const bindings: WorkerBinding[] = [...bindingsWithSecretValues, { type: "d1", name: bindingName, id: tenantDatabaseId }];
+async function redeployWithBindings(accountId: string, apiToken: string, bindings: WorkerBinding[], jwtSecret: string): Promise<void> {
+  const bindingsWithSecretValues = bindings.map((b) => (b.type === "secret_text" ? { ...b, text: jwtSecret } : b));
 
   const metadata = {
     main_module: "index.js",
     compatibility_date: COMPATIBILITY_DATE,
-    bindings,
+    bindings: bindingsWithSecretValues,
   };
 
   const form = new FormData();
@@ -99,4 +84,39 @@ export async function addTenantBindingAndRedeploy(
   if (!res.ok || !body.success) {
     throw new Error(`Redeploy failed (status ${res.status}): ${JSON.stringify(body.errors ?? body)}`);
   }
+}
+
+/** Adds a D1 binding for the given tenant database and redeploys -- existing bindings are preserved as-is. */
+export async function addTenantBindingAndRedeploy(
+  accountId: string,
+  apiToken: string,
+  bindingName: string,
+  tenantDatabaseId: string,
+  jwtSecret: string,
+): Promise<void> {
+  const currentBindings = await getCurrentBindings(accountId, apiToken);
+  if (currentBindings.some((b) => b.name === bindingName)) {
+    throw new Error(`binding "${bindingName}" already exists on ${SCRIPT_NAME}`);
+  }
+  const bindings = [...currentBindings, { type: "d1", name: bindingName, id: tenantDatabaseId }];
+  await redeployWithBindings(accountId, apiToken, bindings, jwtSecret);
+}
+
+/**
+ * Removes a tenant's D1 binding and redeploys -- the first step of
+ * deleting a tenant (cuts installment-api's access to their database
+ * immediately, before the control-plane records or the database itself
+ * are touched). A no-op (not an error) if the binding is already gone,
+ * so delete-tenant stays safe to retry.
+ */
+export async function removeTenantBindingAndRedeploy(
+  accountId: string,
+  apiToken: string,
+  bindingName: string,
+  jwtSecret: string,
+): Promise<void> {
+  const currentBindings = await getCurrentBindings(accountId, apiToken);
+  if (!currentBindings.some((b) => b.name === bindingName)) return;
+  const bindings = currentBindings.filter((b) => b.name !== bindingName);
+  await redeployWithBindings(accountId, apiToken, bindings, jwtSecret);
 }

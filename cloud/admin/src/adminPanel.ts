@@ -32,6 +32,7 @@ export const ADMIN_PANEL_HTML = `<!doctype html>
   button { cursor: pointer; border: none; border-radius: 6px; padding: 8px 14px; font-size: 14px; background: #111; color: #fff; }
   button.secondary { background: #fff; color: #111; border: 1px solid #ccc; }
   button.danger { background: #dc2626; }
+  button.danger-outline { background: #fff; color: #dc2626; border: 1px solid #dc2626; }
   button:disabled { opacity: 0.5; cursor: default; }
   .row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
   .error { color: #dc2626; font-size: 13px; }
@@ -154,12 +155,16 @@ async function loadTenants() {
         <td class="row-actions">
           <button data-action="extend" data-id="\${escapeHtml(t.id)}">تمديد 30 يوم</button>
           <button class="danger" data-action="suspend" data-id="\${escapeHtml(t.id)}">إيقاف</button>
+          <button class="danger-outline" data-delete-id="\${escapeHtml(t.id)}" data-shop-name="\${escapeHtml(t.shop_name)}">حذف نهائي</button>
         </td>
       \`;
       body.appendChild(tr);
     }
     body.querySelectorAll("button[data-action]").forEach((btn) => {
       btn.addEventListener("click", () => handleSubscriptionAction(btn.dataset.id, btn.dataset.action));
+    });
+    body.querySelectorAll("button[data-delete-id]").forEach((btn) => {
+      btn.addEventListener("click", () => handleDeleteTenant(btn.dataset.deleteId, btn.dataset.shopName));
     });
   } catch (e) {
     errEl.textContent = e.message;
@@ -176,6 +181,28 @@ async function handleSubscriptionAction(tenantId, action) {
   }
   try {
     await api(\`/admin/tenants/\${tenantId}/subscription\`, { method: "POST", body: JSON.stringify(payload) });
+    await loadTenants();
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
+// Deleting a tenant is permanent and irreversible -- destroys their D1
+// database (every customer, sale, and payment they have) with no
+// recovery path. The "type the shop name" prompt matches the server's
+// own check (see index.ts's POST /admin/tenants/:id/delete) so a stray
+// click can't get through even by luck.
+async function handleDeleteTenant(tenantId, shopName) {
+  const typed = window.prompt(
+    \`تحذير: هذا حذف نهائي لا يمكن التراجع عنه — يمسح قاعدة بيانات "\${shopName}" بالكامل (كل الزبائن والفواتير والدفعات).\\n\\nللتأكيد، اكتب اسم المحل تماماً كما هو:\`,
+  );
+  if (typed === null) return;
+  if (typed !== shopName) {
+    alert("الاسم غير مطابق — تم الإلغاء.");
+    return;
+  }
+  try {
+    await api(\`/admin/tenants/\${tenantId}/delete\`, { method: "POST", body: JSON.stringify({ confirm_shop_name: typed }) });
     await loadTenants();
   } catch (e) {
     alert(e.message);
