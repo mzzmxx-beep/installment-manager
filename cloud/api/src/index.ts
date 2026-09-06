@@ -5,6 +5,9 @@ import * as customerRepo from "./repo/customer";
 import * as productRepo from "./repo/product";
 import * as saleRepo from "./repo/sale";
 import * as paymentRepo from "./repo/payment";
+import * as reportingRepo from "./repo/reporting";
+import * as analyticsRepo from "./repo/analytics";
+import * as currencyReportRepo from "./repo/currencyReport";
 
 type Bindings = {
   CONTROL_PLANE_DB: D1Database;
@@ -130,6 +133,68 @@ app.post("/api/payments", async (c) => {
 
 app.get("/api/customers/:customerId/payments", async (c) => {
   const dtos = await paymentRepo.getPaymentsForCustomer(c.get("tenantDb"), c.req.param("customerId"));
+  return c.json(dtos);
+});
+
+// -- Reports & analytics -----------------------------------------------
+
+app.get("/api/customers/:customerId/statement", async (c) => {
+  const dto = await reportingRepo.getCustomerStatement(c.get("tenantDb"), c.req.param("customerId"));
+  return c.json(dto);
+});
+
+app.get("/api/reports/overdue-installments", async (c) => {
+  const date = c.req.query("date") ?? new Date().toISOString().slice(0, 10);
+  const dtos = await reportingRepo.getOverdueInstallments(c.get("tenantDb"), date);
+  return c.json(dtos);
+});
+
+app.get("/api/reports/sales-summary", async (c) => {
+  const dtos = await analyticsRepo.getSalesSummary(c.get("tenantDb"), c.req.query("from"), c.req.query("to"));
+  return c.json(dtos);
+});
+
+app.get("/api/reports/top-products", async (c) => {
+  const limit = Number(c.req.query("limit") ?? "10");
+  const dtos = await analyticsRepo.getTopProducts(c.get("tenantDb"), limit);
+  return c.json(dtos);
+});
+
+app.get("/api/reports/top-customers", async (c) => {
+  const limit = Number(c.req.query("limit") ?? "10");
+  const dtos = await analyticsRepo.getTopCustomers(c.get("tenantDb"), limit);
+  return c.json(dtos);
+});
+
+app.get("/api/reports/most-overdue-customers", async (c) => {
+  const date = c.req.query("date") ?? new Date().toISOString().slice(0, 10);
+  const limit = Number(c.req.query("limit") ?? "10");
+  const dtos = await analyticsRepo.getMostOverdueCustomers(c.get("tenantDb"), date, limit);
+  return c.json(dtos);
+});
+
+app.get("/api/reports/customers-overview", async (c) => {
+  const dtos = await analyticsRepo.getCustomersOverview(c.get("tenantDb"));
+  return c.json(dtos);
+});
+
+app.get("/api/reports/sale-conversions", async (c) => {
+  const dtos = await currencyReportRepo.getSaleConversions(c.get("tenantDb"), c.req.query("from"), c.req.query("to"));
+  return c.json(dtos);
+});
+
+app.get("/api/reports/payment-conversions", async (c) => {
+  const dtos = await currencyReportRepo.getPaymentConversions(c.get("tenantDb"), c.req.query("from"), c.req.query("to"));
+  return c.json(dtos);
+});
+
+app.get("/api/reports/product-conversion-summary", async (c) => {
+  const dtos = await currencyReportRepo.getProductConversionSummary(c.get("tenantDb"));
+  return c.json(dtos);
+});
+
+app.get("/api/reports/customer-conversion-summary", async (c) => {
+  const dtos = await currencyReportRepo.getCustomerConversionSummary(c.get("tenantDb"));
   return c.json(dtos);
 });
 

@@ -59,11 +59,23 @@ https://installment-api.mzzmxx.workers.dev
   الموجودة باختبارات Rust الأصلية (مثال: بيع ٣٣٠,٠٠٠ دينار / ٣ أقساط،
   دفعة ١٥٠,٠٠٠ توزّعت ١١٠,٠٠٠ + ٤٠,٠٠٠ بالضبط كما متوقع).
 
-**لم يُبنَ بعد (يحتاج جولة عمل ثانية بنفس المرحلة):**
+**التقارير والتحليلات — انتقلت بالكامل واختُبرت فعلياً:**
 
-- التقارير والتحليلات (`repo/analytics.rs`, `repo/currency_report.rs`,
-  `repo/reporting.rs`) — كشوفات الزبون، لوحة المتأخرات، ترتيب المنتجات/
-  الزبائن، تقارير تحويل العملة. لم تُنقل بعد.
+- `GET /api/customers/:id/statement` — كشف الزبون الكامل (فواتير + دفعات
+  + الرصيد المتبقي بكل عملة).
+- `GET /api/reports/overdue-installments` — كل الأقساط المتأخرة.
+- `GET /api/reports/sales-summary` — إجمالي المبيعات والربح والمُحصَّل/
+  المتبقي بكل عملة.
+- `GET /api/reports/top-products`, `/top-customers`,
+  `/most-overdue-customers`, `/customers-overview` — التصنيفات والملخصات.
+- `GET /api/reports/sale-conversions`, `/payment-conversions`,
+  `/product-conversion-summary`, `/customer-conversion-summary` — تقارير
+  تحويل العملة (بما فيها إعادة اشتقاق السعر الأصلي قبل التحويل، أعقد جزء
+  بهذه المجموعة) — اختُبرت يدوياً ببيع منتج مسعّر بالدولار ضمن فاتورة
+  بالدينار وتأكدت الأرقام مطابقة تماماً لمنطق `currency_report.rs` الأصلي.
+
+**لم يُبنَ بعد:**
+
 - مستمسكات الزبون (صور) — الجدول موجود بالمخطط (`customer_document`) لكن
   لا يوجد Worker endpoint لرفعها إلى R2 بعد.
 - حساب/تسجيل زبون جديد تلقائي من التطبيق نفسه — حالياً حساب الزبون
