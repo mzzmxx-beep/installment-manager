@@ -14,10 +14,11 @@ import * as currencyReportRepo from "./repo/currencyReport";
 
 type Bindings = {
   CONTROL_PLANE_DB: D1Database;
-  // Phase 2 scope: exactly one tenant, statically bound. See wrangler.toml
-  // and cloud/README.md for why this isn't dynamic yet.
-  TENANT_DEMO_DB: D1Database;
   JWT_SECRET: string;
+  // Every other binding is one tenant's D1 database, added dynamically by
+  // cloud/admin's provisioning flow (binding name = tenant.binding_name
+  // in the control plane) -- there's no fixed set known at compile time.
+  [bindingName: string]: unknown;
 };
 
 type Variables = {
@@ -92,16 +93,24 @@ app.use("/api/*", async (c, next) => {
   const claims = await verifySession(token, c.env.JWT_SECRET);
   if (!claims) throw new ApiError(401, "invalid or expired session");
 
-  const tenant = await c.env.CONTROL_PLANE_DB.prepare("SELECT status, subscription_expires_at, d1_database_id FROM tenant WHERE id = ?1")
+  const tenant = await c.env.CONTROL_PLANE_DB.prepare("SELECT status, subscription_expires_at, binding_name FROM tenant WHERE id = ?1")
     .bind(claims.tenantId)
-    .first<{ status: string; subscription_expires_at: string; d1_database_id: string }>();
+    .first<{ status: string; subscription_expires_at: string; binding_name: string | null }>();
   if (!tenant) throw new ApiError(403, "tenant not found");
   if (tenant.status === "suspended") throw new ApiError(403, "subscription suspended");
   if (new Date(tenant.subscription_expires_at) < new Date()) throw new ApiError(403, "subscription expired, please renew");
+  if (!tenant.binding_name) throw new ApiError(503, "tenant provisioning incomplete -- no database bound yet");
 
-  // Only one tenant database is wired up in Phase 2 (see Bindings above).
+  // Each tenant gets its own real D1 binding (added dynamically by
+  // cloud/admin's provisioning flow) rather than a shared/HTTP-routed
+  // database -- D1's HTTP management API has no multi-statement
+  // transaction support, so it can't safely serve writes like
+  // create_credit_sale that must be atomic. See cloud/README.md.
+  const tenantDb = c.env[tenant.binding_name] as D1Database | undefined;
+  if (!tenantDb) throw new ApiError(503, `tenant database binding "${tenant.binding_name}" not found on this Worker`);
+
   c.set("tenantId", claims.tenantId);
-  c.set("tenantDb", c.env.TENANT_DEMO_DB);
+  c.set("tenantDb", tenantDb);
   await next();
 });
 

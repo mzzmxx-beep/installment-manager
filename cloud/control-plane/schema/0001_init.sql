@@ -16,6 +16,15 @@ CREATE TABLE tenant (
     phone                   TEXT NOT NULL,
     email                   TEXT NOT NULL,
     d1_database_id          TEXT NOT NULL,
+    -- Name of this tenant's D1 binding on the installment-api Worker
+    -- (e.g. "TENANT_DEMO_DB") -- installment-api looks up
+    -- `env[binding_name]` at request time instead of a hardcoded binding,
+    -- since D1's HTTP management API has no multi-statement transaction
+    -- support and can't safely serve money-critical writes (see
+    -- cloud/README.md). Set by cloud/admin's provisioning flow, which
+    -- adds the matching binding to installment-api via the Workers API
+    -- when a tenant is created.
+    binding_name             TEXT,
     -- 'trial' | 'active' | 'expired' | 'suspended'
     status                  TEXT NOT NULL DEFAULT 'trial'
                                 CHECK (status IN ('trial', 'active', 'expired', 'suspended')),
