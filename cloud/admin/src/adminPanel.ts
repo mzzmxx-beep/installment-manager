@@ -112,6 +112,16 @@ async function api(path, options) {
   return body;
 }
 
+// Tenant fields (shop_name, owner_name, owner_email) are admin-supplied
+// today, but get rendered back via innerHTML below -- escape them so a
+// value like "<script>..." typed into the "add tenant" form (or later,
+// any less-trusted input path) can't run in the admin's own session.
+function escapeHtml(value) {
+  const div = document.createElement("div");
+  div.textContent = value == null ? "" : String(value);
+  return div.innerHTML;
+}
+
 function showLogin() {
   document.getElementById("login-view").classList.remove("hidden");
   document.getElementById("app-view").classList.add("hidden");
@@ -137,13 +147,13 @@ async function loadTenants() {
       const tr = document.createElement("tr");
       const expires = t.subscription_expires_at ? t.subscription_expires_at.slice(0, 10) : "—";
       tr.innerHTML = \`
-        <td>\${t.shop_name}</td>
-        <td>\${t.owner_name}<br><span class="muted">\${t.owner_email || ""}</span></td>
-        <td><span class="badge \${t.status}">\${statusLabel(t.status)}</span></td>
-        <td>\${expires}</td>
+        <td>\${escapeHtml(t.shop_name)}</td>
+        <td>\${escapeHtml(t.owner_name)}<br><span class="muted">\${escapeHtml(t.owner_email || "")}</span></td>
+        <td><span class="badge \${escapeHtml(t.status)}">\${escapeHtml(statusLabel(t.status))}</span></td>
+        <td>\${escapeHtml(expires)}</td>
         <td class="row-actions">
-          <button data-action="extend" data-id="\${t.id}">تمديد 30 يوم</button>
-          <button class="danger" data-action="suspend" data-id="\${t.id}">إيقاف</button>
+          <button data-action="extend" data-id="\${escapeHtml(t.id)}">تمديد 30 يوم</button>
+          <button class="danger" data-action="suspend" data-id="\${escapeHtml(t.id)}">إيقاف</button>
         </td>
       \`;
       body.appendChild(tr);

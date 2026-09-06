@@ -4,6 +4,7 @@ import { cors } from "hono/cors";
 import { hashPassword, signSession, verifyPassword, verifySession } from "./auth";
 import { ApiError } from "./db";
 import { toCamelCase, toSnakeCase } from "./case";
+import { checkLoginRateLimit, recordFailedLogin } from "./rateLimit";
 import * as customerRepo from "./repo/customer";
 import * as productRepo from "./repo/product";
 import * as saleRepo from "./repo/sale";
@@ -57,12 +58,15 @@ app.onError((err, c) => {
 
 app.post("/auth/login", async (c) => {
   const body = await c.req.json<{ email: string; password: string }>();
+  await checkLoginRateLimit(c.env.CONTROL_PLANE_DB, body.email, "tenant");
+
   const account = await c.env.CONTROL_PLANE_DB.prepare(
     "SELECT id, tenant_id, password_hash, role FROM account WHERE email = ?1",
   )
     .bind(body.email)
     .first<{ id: string; tenant_id: string; password_hash: string; role: "owner" | "staff" }>();
   if (!account || !(await verifyPassword(body.password, account.password_hash))) {
+    await recordFailedLogin(c.env.CONTROL_PLANE_DB, body.email, "tenant");
     throw new ApiError(401, "invalid email or password");
   }
 

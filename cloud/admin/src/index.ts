@@ -8,6 +8,7 @@ import { createD1Database, deleteD1Database, runD1Query } from "./cloudflare";
 import { addTenantBindingAndRedeploy } from "./deployTenantApi";
 import { tenantSchemaStatements } from "./tenantSchema";
 import { ADMIN_PANEL_HTML } from "./adminPanel";
+import { checkLoginRateLimit, recordFailedLogin } from "./rateLimit";
 
 type Bindings = {
   CONTROL_PLANE_DB: D1Database;
@@ -52,7 +53,10 @@ app.onError((err, c) => {
 
 app.post("/auth/login", async (c) => {
   const body = await c.req.json<{ email: string; password: string }>();
+  await checkLoginRateLimit(c.env.CONTROL_PLANE_DB, body.email, "admin");
+
   if (body.email !== c.env.ADMIN_EMAIL || !(await verifyPassword(body.password, c.env.ADMIN_PASSWORD_HASH))) {
+    await recordFailedLogin(c.env.CONTROL_PLANE_DB, body.email, "admin");
     throw new ApiError(401, "invalid email or password");
   }
   const token = await signSession({ sub: "admin", role: "admin", exp: Math.floor(Date.now() / 1000) + 60 * 60 * 12 }, c.env.ADMIN_JWT_SECRET);
@@ -134,6 +138,11 @@ app.post("/admin/tenants", async (c) => {
   const payload = await readBody<NewTenantPayload>(c);
   if (!payload.shopName || !payload.ownerName || !payload.phone || !payload.email || !payload.password) {
     throw new ApiError(400, "كل الحقول مطلوبة");
+  }
+  // The form's minlength="8" is a UX hint only -- anyone calling this API
+  // directly bypasses it, so enforce it server-side too.
+  if (payload.password.length < 8) {
+    throw new ApiError(400, "كلمة المرور يجب أن تكون ٨ أحرف على الأقل");
   }
 
   const existing = await c.env.CONTROL_PLANE_DB.prepare("SELECT id FROM account WHERE email = ?1").bind(payload.email).first();

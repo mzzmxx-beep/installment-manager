@@ -2,7 +2,20 @@
 // Web Crypto -- available natively in the Workers runtime, so no external
 // crypto dependency is needed for this.
 
-const PBKDF2_ITERATIONS = 100_000;
+// OWASP's current floor for PBKDF2-HMAC-SHA256 (600k) is the target;
+// Workers' CPU budget comfortably covers it (well under 100ms).
+const PBKDF2_ITERATIONS = 600_000;
+
+/** Constant-time string equality -- avoids leaking how much of a hash
+ * matched via early-exit timing on a plain `===` comparison. Lengths
+ * aren't secret for a fixed-output hash, so an early return on mismatched
+ * length is fine. */
+function constantTimeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
 
 function toBase64Url(bytes: Uint8Array): string {
   let binary = "";
@@ -16,6 +29,14 @@ function fromBase64Url(value: string): Uint8Array {
   return Uint8Array.from(binary, (c) => c.charCodeAt(0));
 }
 
+// Format: "<iterations>.<salt>.<hash>". The iteration count travels with
+// the hash (not just this constant) so raising PBKDF2_ITERATIONS later
+// only affects newly-hashed passwords -- existing hashes keep verifying
+// against whatever count they were actually created with, the same way
+// bcrypt embeds its cost factor. Old two-part hashes (from before this
+// existed) are treated as 100_000, the original constant.
+const LEGACY_ITERATIONS = 100_000;
+
 export async function hashPassword(password: string): Promise<string> {
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const keyMaterial = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, [
@@ -26,22 +47,23 @@ export async function hashPassword(password: string): Promise<string> {
     keyMaterial,
     256,
   );
-  return `${toBase64Url(salt)}.${toBase64Url(new Uint8Array(bits))}`;
+  return `${PBKDF2_ITERATIONS}.${toBase64Url(salt)}.${toBase64Url(new Uint8Array(bits))}`;
 }
 
 export async function verifyPassword(password: string, stored: string): Promise<boolean> {
-  const [saltPart, hashPart] = stored.split(".");
+  const parts = stored.split(".");
+  const [iterations, saltPart, hashPart] = parts.length === 3 ? parts : [String(LEGACY_ITERATIONS), parts[0], parts[1]];
   if (!saltPart || !hashPart) return false;
   const salt = fromBase64Url(saltPart);
   const keyMaterial = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, [
     "deriveBits",
   ]);
   const bits = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", salt, iterations: PBKDF2_ITERATIONS, hash: "SHA-256" },
+    { name: "PBKDF2", salt, iterations: Number(iterations), hash: "SHA-256" },
     keyMaterial,
     256,
   );
-  return toBase64Url(new Uint8Array(bits)) === hashPart;
+  return constantTimeEqual(toBase64Url(new Uint8Array(bits)), hashPart);
 }
 
 export interface SessionClaims {
