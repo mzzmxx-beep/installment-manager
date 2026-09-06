@@ -11,9 +11,15 @@ async function cfFetch(accountId: string, apiToken: string, path: string, init?:
     ...init,
     headers: { Authorization: `Bearer ${apiToken}`, "Content-Type": "application/json", ...init?.headers },
   });
-  const body = await res.json<{ success: boolean; result: any; errors: { message: string }[] }>();
+  const rawText = await res.text();
+  let body: { success: boolean; result: any; errors: { message: string }[] };
+  try {
+    body = JSON.parse(rawText);
+  } catch {
+    throw new Error(`Cloudflare API returned non-JSON (status ${res.status}): ${rawText.slice(0, 300)}`);
+  }
   if (!res.ok || !body.success) {
-    throw new Error(body.errors?.[0]?.message ?? `Cloudflare API request failed (${res.status})`);
+    throw new Error(`Cloudflare API error (status ${res.status}): ${JSON.stringify(body.errors ?? body)}`);
   }
   return body.result;
 }

@@ -38,7 +38,9 @@ app.get("/", (c) => c.html(ADMIN_PANEL_HTML));
 app.onError((err, c) => {
   if (err instanceof ApiError) return c.json({ error: err.message }, err.status as any);
   console.error(err);
-  return c.json({ error: "internal error" }, 500);
+  // Internal single-operator tool -- surfacing the real message to the
+  // admin panel is useful, not a leak (no end customer ever sees this).
+  return c.json({ error: err instanceof Error ? err.message : "internal error" }, 500);
 });
 
 // -- Admin auth -----------------------------------------------------------
