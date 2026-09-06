@@ -1,0 +1,17 @@
+{
+  "name": "installment-admin-api",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "hono": "^4.6.14"
+  },
+  "devDependencies": {
+    "wrangler": "^4.110.0",
+    "typescript": "^5.7.2",
+    "@cloudflare/workers-types": "^5.20260101.0"
+  }
+}

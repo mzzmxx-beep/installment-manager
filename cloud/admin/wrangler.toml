@@ -1,0 +1,8 @@
+name = "installment-admin-api"
+main = "src/index.ts"
+compatibility_date = "2026-01-01"
+
+[[d1_databases]]
+binding = "CONTROL_PLANE_DB"
+database_name = "installment-control-plane"
+database_id = "4c389e4a-d502-4bc3-b9b8-c51a207473a3"
