@@ -1,0 +1,21 @@
+name = "installment-api"
+main = "src/index.ts"
+compatibility_date = "2026-01-01"
+
+# Phase 2 scope: this Worker knows about exactly one tenant database via a
+# static binding, wired by hand. Real multi-tenant routing (Phase 4, "add a
+# customer from the admin panel with no manual steps") needs dynamic D1
+# access via the Cloudflare HTTP API instead of a compile-time binding per
+# tenant -- that requires a scoped Cloudflare API token, which is a
+# dashboard step, not something this Worker can provision for itself. See
+# cloud/README.md.
+
+[[d1_databases]]
+binding = "CONTROL_PLANE_DB"
+database_name = "installment-control-plane"
+database_id = "4c389e4a-d502-4bc3-b9b8-c51a207473a3"
+
+[[d1_databases]]
+binding = "TENANT_DEMO_DB"
+database_name = "tenant-demo-shop"
+database_id = "8d6b90ef-9c00-4eb3-aaa9-49c7dfde64c3"
