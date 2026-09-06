@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { Context } from "hono";
+import { cors } from "hono/cors";
 import { hashPassword, signSession, verifyPassword, verifySession } from "./auth";
 import { ApiError } from "./db";
 import { toCamelCase, toSnakeCase } from "./case";
@@ -27,6 +28,11 @@ type Variables = {
 type AppContext = Context<{ Bindings: Bindings; Variables: Variables }>;
 
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
+
+// Wildcard origin is safe here since auth is a Bearer token the browser
+// never attaches automatically (unlike cookies) -- no CSRF exposure.
+// Tighten to the Pages domain once that's stable, before real launch.
+app.use("*", cors({ origin: "*", allowHeaders: ["Content-Type", "Authorization"], allowMethods: ["GET", "POST", "OPTIONS"] }));
 
 // The existing React frontend (installment-manager/src) was written
 // against the original Rust/serde wire format (snake_case field names).
