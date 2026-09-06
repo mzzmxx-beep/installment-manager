@@ -31,10 +31,15 @@ type AppContext = Context<{ Bindings: Bindings; Variables: Variables }>;
 
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
-// Wildcard origin is safe here since auth is a Bearer token the browser
-// never attaches automatically (unlike cookies) -- no CSRF exposure.
-// Tighten to the Pages domain once that's stable, before real launch.
-app.use("*", cors({ origin: "*", allowHeaders: ["Content-Type", "Authorization"], allowMethods: ["GET", "POST", "OPTIONS"] }));
+// A wildcard origin would have been safe too (auth is a Bearer token the
+// browser never attaches automatically, unlike cookies -- no CSRF
+// exposure), but now that the real customer domain is live, there's no
+// reason not to scope it down to just the frontends that actually need it.
+const ALLOWED_ORIGINS = ["https://inst.iqcrl.com", "https://installment-web.pages.dev"];
+app.use(
+  "*",
+  cors({ origin: ALLOWED_ORIGINS, allowHeaders: ["Content-Type", "Authorization"], allowMethods: ["GET", "POST", "OPTIONS"] }),
+);
 
 // The existing React frontend (installment-manager/src) was written
 // against the original Rust/serde wire format (snake_case field names).
