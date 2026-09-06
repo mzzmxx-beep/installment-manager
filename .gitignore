@@ -28,3 +28,4 @@ Thumbs.db
 
 # Local tooling state
 .claude/
+.wrangler/
