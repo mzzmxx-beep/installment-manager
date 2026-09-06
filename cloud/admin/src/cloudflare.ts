@@ -31,3 +31,7 @@ export async function createD1Database(accountId: string, apiToken: string, name
 export async function runD1Query(accountId: string, apiToken: string, databaseId: string, sql: string): Promise<void> {
   await cfFetch(accountId, apiToken, `/d1/database/${databaseId}/query`, { method: "POST", body: JSON.stringify({ sql }) });
 }
+
+export async function deleteD1Database(accountId: string, apiToken: string, databaseId: string): Promise<void> {
+  await cfFetch(accountId, apiToken, `/d1/database/${databaseId}`, { method: "DELETE" });
+}

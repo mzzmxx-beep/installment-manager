@@ -4,7 +4,8 @@ import { cors } from "hono/cors";
 import { hashPassword, verifyPassword, signSession, verifySession } from "./auth";
 import { ApiError, newId } from "./db";
 import { toCamelCase, toSnakeCase } from "./case";
-import { createD1Database, runD1Query } from "./cloudflare";
+import { createD1Database, deleteD1Database, runD1Query } from "./cloudflare";
+import { addTenantBindingAndRedeploy } from "./deployTenantApi";
 import { tenantSchemaStatements } from "./tenantSchema";
 import { ADMIN_PANEL_HTML } from "./adminPanel";
 
@@ -18,6 +19,9 @@ type Bindings = {
   // to obtain a token and cloud/admin/wrangler.toml for how it's wired.
   CF_API_TOKEN?: string;
   CF_ACCOUNT_ID?: string;
+  // installment-api's current JWT_SECRET, kept in sync by hand -- see
+  // deployTenantApi.ts's header for why this has to be duplicated here.
+  TENANT_API_JWT_SECRET?: string;
 };
 
 type AppContext = Context<{ Bindings: Bindings }>;
@@ -138,9 +142,30 @@ app.post("/admin/tenants", async (c) => {
   const tenantId = newId();
   const dbName = `tenant-${slugify(payload.shopName)}-${tenantId.slice(0, 8)}`;
 
+  if (!c.env.TENANT_API_JWT_SECRET) {
+    throw new ApiError(501, "التزويد التلقائي غير مكتمل — TENANT_API_JWT_SECRET مفقود (راجع cloud/README.md)");
+  }
+
   const database = await createD1Database(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, dbName);
-  for (const statement of tenantSchemaStatements()) {
-    await runD1Query(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, database.uuid, statement);
+  const bindingName = `TENANT_${tenantId.replace(/-/g, "").toUpperCase()}`;
+  // From here on, any failure must delete the database we just created --
+  // D1 databases on this account are a scarce, capped resource (see
+  // cloud/README.md), and an orphaned one silently eats a slot that a
+  // real tenant might need next.
+  try {
+    for (const statement of tenantSchemaStatements()) {
+      await runD1Query(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, database.uuid, statement);
+    }
+
+    // Give installment-api a real binding to this tenant's database and
+    // redeploy it -- an HTTP-routed connection can't provide the
+    // transaction atomicity money-critical writes need (see
+    // deployTenantApi.ts and cloud/README.md), so this tenant isn't
+    // actually servable until this step succeeds.
+    await addTenantBindingAndRedeploy(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, bindingName, database.uuid, c.env.TENANT_API_JWT_SECRET);
+  } catch (err) {
+    await deleteD1Database(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, database.uuid).catch(() => {});
+    throw err;
   }
 
   const trialExpires = new Date();
@@ -151,8 +176,8 @@ app.post("/admin/tenants", async (c) => {
 
   await c.env.CONTROL_PLANE_DB.batch([
     c.env.CONTROL_PLANE_DB.prepare(
-      "INSERT INTO tenant (id, shop_name, owner_name, phone, email, d1_database_id, status, subscription_expires_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'trial', ?7)",
-    ).bind(tenantId, payload.shopName, payload.ownerName, payload.phone, payload.email, database.uuid, trialExpires.toISOString()),
+      "INSERT INTO tenant (id, shop_name, owner_name, phone, email, d1_database_id, binding_name, status, subscription_expires_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'trial', ?8)",
+    ).bind(tenantId, payload.shopName, payload.ownerName, payload.phone, payload.email, database.uuid, bindingName, trialExpires.toISOString()),
     c.env.CONTROL_PLANE_DB.prepare(
       "INSERT INTO account (id, tenant_id, email, password_hash, role) VALUES (?1, ?2, ?3, ?4, 'owner')",
     ).bind(accountId, tenantId, payload.email, passwordHash),
